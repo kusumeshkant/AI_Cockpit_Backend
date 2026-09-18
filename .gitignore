@@ -1,0 +1,34 @@
+# Cockpit backend (Supabase). Supabase-specific rules also live in
+# supabase/.gitignore.
+
+# Secrets — never commit. `.env.example` files are templates and stay tracked.
+.env
+.env.*
+!.env.example
+*.key
+*.pem
+*.p8
+*.p12
+service-account*.json
+*-service-account*.json
+*firebase-adminsdk*.json
+
+# Supabase local runtime state
+supabase/.branches/
+supabase/.temp/
+supabase/snippets/
+supabase/.env
+
+# Deno / Node caches
+node_modules/
+.deno/
+.npm/
+coverage/
+
+# OS / IDE junk
+.DS_Store
+Thumbs.db
+.idea/
+*.iml
+.vscode/
+*.log

@@ -1,0 +1,15 @@
+{
+  "tasks": {
+    "lint": "deno lint",
+    "test": "deno test --allow-env supabase/functions/_tests",
+    "e2e": "deno run --allow-net --allow-env --allow-read --allow-run scripts/e2e-core-loop.ts"
+  },
+  "lint": {
+    "include": ["supabase/functions", "scripts"]
+  },
+  "fmt": {
+    "include": ["supabase/functions", "scripts"],
+    "singleQuote": true,
+    "lineWidth": 100
+  }
+}
