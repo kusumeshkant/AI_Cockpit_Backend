@@ -10,6 +10,7 @@ Specs: [technical/04-technical-blueprint.md](../../technical/04-technical-bluepr
 product/backend/
 ├─ deno.json                         # lint / test / e2e tasks
 ├─ scripts/
+│  ├─ e2e-agent-trigger.sh / .ts     # Agent Triggers e2e (serves functions flag on + off)
 │  ├─ e2e-core-loop.sh               # runs the end-to-end check
 │  └─ e2e-core-loop.ts               #   (Deno: fetch, HMAC, local callback receiver)
 └─ supabase/
@@ -18,12 +19,13 @@ product/backend/
    │  ├─ 0001_init.sql               # 5 tables, RLS, append-only audit
    │  ├─ 0002_auth_bootstrap.sql     # auth.users → workspace + app_user
    │  ├─ 0003_functions.sql          # transactional RPCs (record_*, create_agent, fcm tokens)
-   │  └─ 0004_phase2.sql             # retry (claim_due_callbacks, pg_cron→pg_net), rotation,
-   │                                 #   get_owned_agent, agent_rate + hit_rate_limit
+   │  ├─ 0004_phase2.sql             # retry (claim_due_callbacks, pg_cron→pg_net), rotation,
+   │  │                              #   get_owned_agent, agent_rate + hit_rate_limit
+   │  └─ 0005_agent_triggers.sql     # agent_trigger, trigger_run, trigger RPCs (feature-flagged)
    ├─ functions/
    │  ├─ _shared/                    # library (not deployed): env, http, errors, logger,
    │  │                              #   supabase, hmac, vault, fcm, push, callback, delivery,
-   │  │                              #   retry, cron, rate_limit, validation, types
+   │  │                              #   retry, cron, rate_limit, trigger, validation, types
    │  ├─ _tests/                     # Deno unit tests (not deployed)
    │  ├─ agents-create/index.ts      # JWT
    │  ├─ actions-inbound/index.ts    # HMAC (no JWT)
@@ -31,9 +33,12 @@ product/backend/
    │  ├─ agents-test-action/index.ts # JWT (owner)
    │  ├─ agents-rotate-secret/index.ts # JWT (owner)
    │  ├─ callbacks-retry/index.ts    # X-Cron-Secret (pg_cron only)
+   │  ├─ agents-configure-trigger/   # JWT (owner), FEATURE_AGENT_TRIGGERS
+   │  ├─ agents-trigger/             # JWT, FEATURE_AGENT_TRIGGERS (handler.ts + index.ts)
    │  └─ .env.example                # copy to .env (git-ignored)
    ├─ tests/core_loop_test.sql       # pgTAP: RLS, privileges, idempotency
    ├─ tests/phase2_test.sql          # pgTAP: retry claims/leases, rotation, rate limit
+   ├─ tests/agent_triggers_test.sql  # pgTAP: trigger RPCs, rate-limit boundary, RLS
    └─ seed.sql                       # LOCAL ONLY dev user + agent + cron Vault secrets
 ```
 
@@ -64,11 +69,14 @@ supabase functions serve --no-verify-jwt --env-file supabase/functions/.env
 
 ```bash
 deno task lint               # deno lint (functions + scripts)
-deno task test               # 44 unit tests: hmac, validation, errors/logger, fcm, callback,
-                             #   backoff, cron guard, rate limiter, Retry-After
-supabase test db             # 67 pgTAP assertions: RLS, privileges, idempotency, append-only
-                             #   audit, retry claims + leases, rotation, rate-limit windows
+deno task test               # 58 unit tests: hmac, validation, errors/logger, fcm, callback,
+                             #   backoff, cron guard, rate limiter, Retry-After, agent triggers
+supabase test db             # 114 pgTAP assertions: RLS, privileges, idempotency, append-only
+                             #   audit, retry claims + leases, rotation, rate-limit windows,
+                             #   agent triggers
 scripts/e2e-core-loop.sh     # 79-check end-to-end run against the running stack
+scripts/e2e-agent-trigger.sh # Agent Triggers: flag on (29 checks) + flag off (7); stop any
+                             #   running `functions serve` first — it serves them itself
 ```
 
 The e2e script:
@@ -156,6 +164,28 @@ To turn the downloaded key into a single line: `python -c "import json,sys; prin
 ## Deploying (later)
 
 `supabase link --project-ref <ref>` → `supabase db push` → `supabase functions deploy` (config.toml keeps `actions-inbound` and `callbacks-retry` without JWT verification) → `supabase secrets set PUBLIC_INBOUND_BASE_URL=… FCM_SERVICE_ACCOUNT_JSON=… CRON_SECRET=<random>` → in the SQL editor: `select vault.create_secret('https://<ref>.supabase.co/functions/v1/callbacks-retry', 'cockpit_callbacks_retry_url'); select vault.create_secret('<same CRON_SECRET>', 'cockpit_cron_secret');`. **Never** set `ALLOW_INSECURE_CALLBACKS` in a deployed project, and never load `seed.sql` into one.
+
+## Agent Triggers (feature-flagged)
+
+The reverse direction: a signed-in user starts an agent. **Off by default.** Both functions answer `404 feature_disabled` before touching the database unless `FEATURE_AGENT_TRIGGERS=true`.
+
+| Env | Default | Meaning |
+|---|---|---|
+| `FEATURE_AGENT_TRIGGERS` | unset (off) | Enables `agents-configure-trigger` and `agents-trigger`. Leave unset in committed config. |
+| `ALLOW_INSECURE_TRIGGERS` | unset (off) | **Local only.** Allows `http://` and private-network trigger URLs. |
+
+| Function | Auth | Request | Success |
+|---|---|---|---|
+| `POST agents-configure-trigger` | User JWT (owner) | `{ action: "configure", agent_id, trigger_url, min_interval_secs? }` | `200 { trigger, trigger_secret }`. The `whtrig_` secret is returned **once**; reconfiguring rotates it. |
+| | | `{ action: "set_enabled", agent_id, enabled }` | `200 { trigger }` |
+| `POST agents-trigger` | User JWT (workspace member) | `{ agent_id }` | `200 { run_id, delivered, detail }`. `not_found` 404 · `trigger_disabled` 409 · `rate_limited` 429 (+ `Retry-After`, per `min_interval_secs`) |
+
+**What the agent receives:** `POST trigger_url` with body `{ trigger_id, agent_id, triggered_at, nonce }` and headers `X-Cockpit-Trigger-Signature: sha256=<hex hmac(raw body, trigger secret)>` and `X-Cockpit-Trigger-Id`. Redirects aren't followed, and the request times out after 5 s.
+
+**How it works:**
+- **Tables:** `agent_trigger` (one per agent) and `trigger_run` (one per attempt). Clients can read their own workspace's rows but can't write, and can't read the Vault secret id (column grants).
+- **RPCs:** `configure_agent_trigger` writes the secret to Vault in the same transaction. `begin_trigger_run` records the run and audits `trigger_fired` before anything is sent, and serializes concurrent calls on the interval check. `record_trigger_result` marks the run `sent` / `failed` (`trigger_failed` audited).
+- **Audit:** `audit_entry` gains `trigger_configured`, `trigger_fired` and `trigger_failed`. These carry no `action_id`; every other event still requires one.
 
 ## Not built yet
 

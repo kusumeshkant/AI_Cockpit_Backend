@@ -62,6 +62,43 @@ export interface RetryRunResponse {
   failed: number;
 }
 
+/** Agent trigger run state (mirrors `trigger_run.status`). */
+export type TriggerRunStatus = 'pending' | 'sent' | 'failed';
+
+/** Outcome of `begin_trigger_run`. */
+export type TriggerRunOutcome = 'ok' | 'not_found' | 'not_configured' | 'disabled' | 'rate_limited';
+
+/** An agent's trigger as returned to the app (never the secret or its id). */
+export interface TriggerConfigDto {
+  agent_id: string;
+  trigger_url: string;
+  secret_hint: string;
+  enabled: boolean;
+  min_interval_secs: number;
+  updated_at: string;
+}
+
+/** `agents-configure-trigger` (configure) response — the secret, once. */
+export interface ConfigureTriggerResponse {
+  trigger: TriggerConfigDto;
+  trigger_secret: string;
+}
+
+/** `agents-trigger` response. */
+export interface TriggerRunResponse {
+  run_id: string;
+  delivered: boolean;
+  detail: string;
+}
+
+/** Body POSTed to the agent's trigger_url. */
+export interface TriggerPayload {
+  trigger_id: string;
+  agent_id: string;
+  triggered_at: string;
+  nonce: string;
+}
+
 /** `actions-inbound` response. */
 export interface InboundResponse {
   action_id: string;

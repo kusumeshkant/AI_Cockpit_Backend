@@ -7,6 +7,7 @@ export const MAX_INBOUND_BYTES = 256 * 1024;
 export const MAX_DECISION_BYTES = 128 * 1024;
 export const MAX_CREATE_AGENT_BYTES = 8 * 1024;
 export const MAX_AGENT_REF_BYTES = 1024;
+export const MAX_TRIGGER_CONFIG_BYTES = 4 * 1024;
 
 const payloadObject = z.record(z.string(), z.unknown());
 
@@ -27,6 +28,37 @@ export const AgentRefSchema = z
     agent_id: z.string().uuid(),
   })
   .strict();
+
+/** `agents-trigger` body. */
+export const TriggerSchema = z
+  .object({
+    agent_id: z.string().uuid(),
+  })
+  .strict();
+
+/**
+ * `agents-configure-trigger` body: `action: configure` (create or
+ * reconfigure, which rotates the secret) or `action: set_enabled`. The trigger URL must also pass
+ * [isAllowedCallbackUrl] (https + SSRF policy, relaxed by
+ * ALLOW_INSECURE_TRIGGERS locally), checked in the function.
+ */
+export const ConfigureTriggerSchema = z.discriminatedUnion('action', [
+  z
+    .object({
+      action: z.literal('configure'),
+      agent_id: z.string().uuid(),
+      trigger_url: z.string().url().max(2048),
+      min_interval_secs: z.number().int().min(1).max(86400).optional(),
+    })
+    .strict(),
+  z
+    .object({
+      action: z.literal('set_enabled'),
+      agent_id: z.string().uuid(),
+      enabled: z.boolean(),
+    })
+    .strict(),
+]);
 
 /** `actions-inbound` body (blueprint §5.1). */
 export const InboundActionSchema = z

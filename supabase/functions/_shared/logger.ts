@@ -25,6 +25,9 @@ export const REDACTED_KEYS: ReadonlySet<string> = new Set([
   'reason',
   'email',
   'body',
+  'trigger',
+  'trigger_secret',
+  'trigger_url',
 ]);
 
 const MAX_DEPTH = 6;
