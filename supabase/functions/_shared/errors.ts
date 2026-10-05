@@ -14,6 +14,8 @@ export type ErrorCode =
   | 'method_not_allowed'
   | 'payload_too_large'
   | 'rate_limited'
+  | 'feature_disabled'
+  | 'trigger_disabled'
   | 'server';
 
 /** HTTP status for each code. */
@@ -28,6 +30,8 @@ export const STATUS_BY_CODE: Readonly<Record<ErrorCode, number>> = {
   payload_too_large: 413,
   validation: 422,
   rate_limited: 429,
+  feature_disabled: 404,
+  trigger_disabled: 409,
   server: 500,
 };
 
@@ -59,6 +63,8 @@ export function toAppError(error: unknown): AppError {
 export function fromPostgrest(error: PostgrestError): AppError {
   switch (error.message) {
     case 'agent_not_found':
+    case 'trigger_run_not_found':
+    case 'trigger_not_found':
     case 'action_not_found':
       return new AppError('not_found', 'Not found');
     case 'workspace_not_found':
@@ -74,6 +80,9 @@ export function fromPostgrest(error: PostgrestError): AppError {
     case 'invalid_lease':
     case 'invalid_rate_limit':
     case 'invalid_retry_delay':
+    case 'invalid_trigger_url':
+    case 'invalid_min_interval':
+    case 'invalid_enabled':
       return new AppError('validation', error.message);
   }
   // Check-constraint / invalid-input violations are client errors.
