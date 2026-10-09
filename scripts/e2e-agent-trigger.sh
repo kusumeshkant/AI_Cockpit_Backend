@@ -43,9 +43,22 @@ native_path() { if command -v cygpath >/dev/null 2>&1; then cygpath -w "$1"; els
 
 strip_flags() { grep -vE '^(FEATURE_AGENT_TRIGGERS|ALLOW_INSECURE_TRIGGERS)=' "$BASE_ENV" || true; }
 
+is_windows() { case "$(uname -s)" in MINGW* | MSYS* | CYGWIN*) return 0 ;; *) return 1 ;; esac; }
+
+# `serve` runs as a tree (npx → node → supabase), and killing only $SERVE_PID
+# can leave the real CLI running: the next serve then never comes up.
 stop_serve() {
   if [[ -n "$SERVE_PID" ]]; then
-    kill "$SERVE_PID" 2>/dev/null || true
+    if is_windows; then
+      # $! is an MSYS pid; the CLI processes are native Windows children that
+      # `kill` doesn't reach. End the whole Windows process tree.
+      local winpid
+      winpid="$(cat "/proc/$SERVE_PID/winpid" 2>/dev/null || true)"
+      if [[ -n "$winpid" ]]; then taskkill //F //T //PID "$winpid" >/dev/null 2>&1 || true; fi
+    else
+      # start_serve gives serve its own process group: signal all of it.
+      kill -- "-$SERVE_PID" 2>/dev/null || kill "$SERVE_PID" 2>/dev/null || true
+    fi
     wait "$SERVE_PID" 2>/dev/null || true
     SERVE_PID=""
   fi
@@ -56,8 +69,10 @@ stop_serve() {
 start_serve() {
   local env_file="$1" log_file="$2"
   stop_serve
+  set -m # own process group (POSIX), so stop_serve can end the whole tree
   "${SUPABASE[@]}" functions serve --no-verify-jwt --env-file "$(native_path "$env_file")" >"$log_file" 2>&1 &
   SERVE_PID=$!
+  set +m
   for _ in $(seq 1 60); do
     if [[ "$(curl -s -o /dev/null -w '%{http_code}' "$API_URL/functions/v1/agents-trigger" -X GET)" =~ ^(404|405)$ ]]; then
       # Wait for the trigger function itself (not only the gateway) to answer.
