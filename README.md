@@ -12,7 +12,8 @@ product/backend/
 ├─ scripts/
 │  ├─ e2e-agent-trigger.sh / .ts     # Agent Triggers e2e (serves functions flag on + off)
 │  ├─ e2e-core-loop.sh               # runs the end-to-end check
-│  └─ e2e-core-loop.ts               #   (Deno: fetch, HMAC, local callback receiver)
+│  ├─ e2e-core-loop.ts               #   (Deno: fetch, HMAC, local callback receiver)
+│  └─ e2e-test-action.sh / .ts       # agents-test-action access rules (owner-only)
 └─ supabase/
    ├─ config.toml                    # project "cockpit"; per-function verify_jwt
    ├─ migrations/
@@ -77,6 +78,8 @@ supabase test db             # 114 pgTAP assertions: RLS, privileges, idempotenc
 scripts/e2e-core-loop.sh     # 79-check end-to-end run against the running stack
 scripts/e2e-agent-trigger.sh # Agent Triggers: flag on (29 checks) + flag off (7); stop any
                              #   running `functions serve` first — it serves them itself
+scripts/e2e-test-action.sh   # agents-test-action: 18 checks (foreign agent, approver,
+                             #   disabled agent) against the running stack
 ```
 
 The e2e script:
