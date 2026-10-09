@@ -13,7 +13,8 @@ product/backend/
 │  ├─ e2e-agent-trigger.sh / .ts     # Agent Triggers e2e (serves functions flag on + off)
 │  ├─ e2e-core-loop.sh               # runs the end-to-end check
 │  ├─ e2e-core-loop.ts               #   (Deno: fetch, HMAC, local callback receiver)
-│  └─ e2e-test-action.sh / .ts       # agents-test-action access rules (owner-only)
+│  ├─ e2e-test-action.sh / .ts       # agents-test-action access rules (owner-only)
+│  └─ e2e-push-roles.sh / .ts        # device-token ownership + owner-only agent creation
 └─ supabase/
    ├─ config.toml                    # project "cockpit"; per-function verify_jwt
    ├─ migrations/
@@ -72,14 +73,16 @@ supabase functions serve --no-verify-jwt --env-file supabase/functions/.env
 deno task lint               # deno lint (functions + scripts)
 deno task test               # 58 unit tests: hmac, validation, errors/logger, fcm, callback,
                              #   backoff, cron guard, rate limiter, Retry-After, agent triggers
-supabase test db             # 114 pgTAP assertions: RLS, privileges, idempotency, append-only
+supabase test db             # 128 pgTAP assertions: RLS, privileges, idempotency, append-only
                              #   audit, retry claims + leases, rotation, rate-limit windows,
-                             #   agent triggers
+                             #   agent triggers, token ownership, owner-only agents
 scripts/e2e-core-loop.sh     # 79-check end-to-end run against the running stack
 scripts/e2e-agent-trigger.sh # Agent Triggers: flag on (29 checks) + flag off (7); stop any
                              #   running `functions serve` first — it serves them itself
 scripts/e2e-test-action.sh   # agents-test-action: 18 checks (foreign agent, approver,
                              #   disabled agent) against the running stack
+scripts/e2e-push-roles.sh    # 0006: 22 checks (token handover between users, approver
+                             #   gets 403 forbidden on agents-create, approver still decides)
 ```
 
 The e2e script:

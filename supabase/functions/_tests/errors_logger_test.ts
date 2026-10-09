@@ -12,6 +12,7 @@ function pg(message: string, code = 'P0001'): PostgrestError {
 Deno.test('error codes map to HTTP statuses', () => {
   assertEquals(new AppError('invalid_signature', 'x').status, 401);
   assertEquals(new AppError('agent_disabled', 'x').status, 403);
+  assertEquals(new AppError('forbidden', 'x').status, 403);
   assertEquals(new AppError('conflict', 'x').status, 409);
   assertEquals(new AppError('expired', 'x').status, 410);
   assertEquals(new AppError('validation', 'x').status, 422);
@@ -26,6 +27,7 @@ Deno.test('unknown errors become a generic server error', () => {
 
 Deno.test('RPC errors map by raised message and SQLSTATE', () => {
   assertEquals(fromPostgrest(pg('agent_disabled')).code, 'agent_disabled');
+  assertEquals(fromPostgrest(pg('forbidden', '42501')).code, 'forbidden');
   assertEquals(fromPostgrest(pg('agent_not_found', 'P0002')).code, 'not_found');
   assertEquals(fromPostgrest(pg('workspace_not_found', 'P0002')).code, 'unauthorized');
   assertEquals(fromPostgrest(pg('new row violates check', '23514')).code, 'validation');
