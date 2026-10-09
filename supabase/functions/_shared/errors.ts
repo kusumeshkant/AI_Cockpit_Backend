@@ -7,6 +7,7 @@ export type ErrorCode =
   | 'unauthorized'
   | 'invalid_signature'
   | 'agent_disabled'
+  | 'forbidden'
   | 'not_found'
   | 'conflict'
   | 'expired'
@@ -23,6 +24,7 @@ export const STATUS_BY_CODE: Readonly<Record<ErrorCode, number>> = {
   unauthorized: 401,
   invalid_signature: 401,
   agent_disabled: 403,
+  forbidden: 403,
   not_found: 404,
   method_not_allowed: 405,
   conflict: 409,
@@ -72,6 +74,8 @@ export function fromPostgrest(error: PostgrestError): AppError {
       return new AppError('unauthorized', 'Unauthorized');
     case 'agent_disabled':
       return new AppError('agent_disabled', 'Agent is disabled');
+    case 'forbidden':
+      return new AppError('forbidden', 'Only the workspace owner can do this');
     case 'invalid_decision':
     case 'invalid_idempotency_key':
     case 'invalid_secret':
