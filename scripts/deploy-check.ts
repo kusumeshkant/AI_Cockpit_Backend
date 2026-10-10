@@ -10,6 +10,9 @@
 //   SUPABASE_DB_URL        Postgres connection string → database checks
 //                          (opened in a READ ONLY transaction)
 //   EXPECTED_SITE_URL      Auth site URL to expect (default below)
+// Pinned inline like the functions' deps.ts; a bare specifier would need an
+// import map in deno.json, which the Edge Function deploy would also read.
+// deno-lint-ignore no-import-prefix
 import postgres from 'npm:postgres@3.4.5';
 
 const EXPECTED = {
