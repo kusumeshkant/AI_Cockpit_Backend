@@ -87,6 +87,7 @@ export function fromPostgrest(error: PostgrestError): AppError {
     case 'invalid_trigger_url':
     case 'invalid_min_interval':
     case 'invalid_enabled':
+    case 'invalid_user':
       return new AppError('validation', error.message);
   }
   // Check-constraint / invalid-input violations are client errors.

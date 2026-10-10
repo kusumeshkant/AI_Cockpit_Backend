@@ -123,6 +123,14 @@ export interface CallbackPayload {
   decided_at: string;
 }
 
+/** `account-delete` response. */
+export interface AccountDeleteResponse {
+  /** `deleted`, or `already_deleted` when a retry found no data left. */
+  outcome: 'deleted' | 'already_deleted';
+  workspace_deleted: boolean;
+  members_moved: number;
+}
+
 /** Response envelope shared by every function. */
 export type Envelope<T> =
   | { ok: true; data: T }
