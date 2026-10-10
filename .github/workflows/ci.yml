@@ -115,13 +115,13 @@ jobs:
       # e2e-agent-trigger need a callback receiver reachable from the edge
       # runtime container (host.docker.internal) and stay local-only for now.
       - name: e2e — account deletion
-        run: scripts/e2e-account-delete.sh
+        run: bash scripts/e2e-account-delete.sh
 
       - name: e2e — push token + roles
-        run: scripts/e2e-push-roles.sh
+        run: bash scripts/e2e-push-roles.sh
 
       - name: e2e — test action
-        run: scripts/e2e-test-action.sh
+        run: bash scripts/e2e-test-action.sh
 
       - name: Functions log (on failure)
         if: failure()
