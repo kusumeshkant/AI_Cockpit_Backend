@@ -23,7 +23,10 @@ product/backend/
    │  ├─ 0003_functions.sql          # transactional RPCs (record_*, create_agent, fcm tokens)
    │  ├─ 0004_phase2.sql             # retry (claim_due_callbacks, pg_cron→pg_net), rotation,
    │  │                              #   get_owned_agent, agent_rate + hit_rate_limit
-   │  └─ 0005_agent_triggers.sql     # agent_trigger, trigger_run, trigger RPCs (feature-flagged)
+   │  ├─ 0005_agent_triggers.sql     # agent_trigger, trigger_run, trigger RPCs (feature-flagged)
+   │  ├─ 0006_token_owner_and_agent_roles.sql # one device token = one user; owner-only agents
+   │  └─ 0007_account_deletion.sql   # delete_account_data RPC, erasure-only audit bypass,
+   │                                 #   account_deletion_log (no PII)
    ├─ functions/
    │  ├─ _shared/                    # library (not deployed): env, http, errors, logger,
    │  │                              #   supabase, hmac, vault, fcm, push, callback, delivery,
@@ -37,10 +40,13 @@ product/backend/
    │  ├─ callbacks-retry/index.ts    # X-Cron-Secret (pg_cron only)
    │  ├─ agents-configure-trigger/   # JWT (owner), FEATURE_AGENT_TRIGGERS
    │  ├─ agents-trigger/             # JWT, FEATURE_AGENT_TRIGGERS (handler.ts + index.ts)
+   │  ├─ account-delete/index.ts     # JWT: deletes the caller's account
    │  └─ .env.example                # copy to .env (git-ignored)
    ├─ tests/core_loop_test.sql       # pgTAP: RLS, privileges, idempotency
    ├─ tests/phase2_test.sql          # pgTAP: retry claims/leases, rotation, rate limit
    ├─ tests/agent_triggers_test.sql  # pgTAP: trigger RPCs, rate-limit boundary, RLS
+   ├─ tests/token_roles_test.sql     # pgTAP: token ownership, owner-only agents
+   ├─ tests/account_deletion_test.sql # pgTAP: account deletion, audit privileges
    └─ seed.sql                       # LOCAL ONLY dev user + agent + cron Vault secrets
 ```
 
@@ -71,11 +77,13 @@ supabase functions serve --no-verify-jwt --env-file supabase/functions/.env
 
 ```bash
 deno task lint               # deno lint (functions + scripts)
-deno task test               # 58 unit tests: hmac, validation, errors/logger, fcm, callback,
-                             #   backoff, cron guard, rate limiter, Retry-After, agent triggers
-supabase test db             # 128 pgTAP assertions: RLS, privileges, idempotency, append-only
+deno task test               # 66 unit tests: hmac, validation, errors/logger, fcm, callback,
+                             #   backoff, cron guard, rate limiter, Retry-After, agent triggers,
+                             #   account deletion
+supabase test db             # 158 pgTAP assertions: RLS, privileges, idempotency, append-only
                              #   audit, retry claims + leases, rotation, rate-limit windows,
-                             #   agent triggers, token ownership, owner-only agents
+                             #   agent triggers, token ownership, owner-only agents, account
+                             #   deletion
 scripts/e2e-core-loop.sh     # 79-check end-to-end run against the running stack
 scripts/e2e-agent-trigger.sh # Agent Triggers: flag on (29 checks) + flag off (7); stop any
                              #   running `functions serve` first — it serves them itself
@@ -83,6 +91,9 @@ scripts/e2e-test-action.sh   # agents-test-action: 18 checks (foreign agent, app
                              #   disabled agent) against the running stack
 scripts/e2e-push-roles.sh    # 0006: 22 checks (token handover between users, approver
                              #   gets 403 forbidden on agents-create, approver still decides)
+scripts/e2e-account-delete.sh # 0007 + account-delete: 41 checks (rejections, approver and
+                             #   owner deletion, moved member, retry after failed auth delete,
+                             #   PII-free log)
 ```
 
 The e2e script:
@@ -127,12 +138,26 @@ Every function responds with `{ "ok": true, "data": … }` or `{ "ok": false, "e
 | `POST agents-rotate-secret` | User JWT (owner) | `{ agent_id }` | `200 { agent, inbound_url, signing_secret }`: new secret **once**; the old one stops verifying immediately |
 | `POST callbacks-retry` | `X-Cron-Secret` (pg_cron) | `{}` | `200 { claimed, delivered, rescheduled, failed }` |
 | `rpc/register_fcm_token` | User JWT (PostgREST) | `{ p_token }` | `204` (also `unregister_fcm_token`) |
+| `POST account-delete` | User JWT | `{ confirm: true }` (required, nothing else) | `200 { outcome: deleted\|already_deleted, workspace_deleted, members_moved }`. See *Account deletion*. |
 
 Error codes → HTTP: `unauthorized` / `invalid_signature` 401 · `agent_disabled` 403 · `not_found` 404 · `conflict` 409 · `expired` 410 · `payload_too_large` 413 · `validation` 422 · `rate_limited` 429 (with `Retry-After`) · `server` 500.
 
 `actions-inbound` and `agents-test-action` share a per-agent limit of `INBOUND_RATE_LIMIT_PER_MINUTE` (default 60) in fixed one-minute windows, counted after HMAC verification.
 
 **Callback to the agent** (after the decision commits): `POST callback_url` with `X-Cockpit-Signature` (same secret), `X-Cockpit-Action-Id` and `Idempotency-Key` headers. Body: `{ action_id, external_id, decision, payload (original + edits), edited_payload, reason, decided_at }`. Any 2xx counts as delivered. Redirects are not followed. Retries resend the same body and `Idempotency-Key`, re-signed with the agent's current secret.
+
+## Account deletion
+
+`account-delete` deletes the caller's account in two idempotent steps: the `delete_account_data` RPC removes the data in one transaction, then the function deletes the auth user (sessions, refresh tokens, identities) with the service role. The user id comes from the JWT, never from `app_user`, so a retry after a failed auth delete still works (the RPC then returns `already_deleted`).
+
+| Caller | What happens |
+|---|---|
+| Approver | Their `app_user` row (profile, role, FCM tokens) is deleted. Their decisions stay in the owner's audit trail with `actor_user_id` set to null; `action.decided_by` / `trigger_run.triggered_by` become null. |
+| Owner | The workspace and everything in it are deleted: agents and their Vault secrets (inbound + trigger), actions, audit entries, triggers, trigger runs, rate counters. Every other member is moved to a new personal workspace as its owner; their account is kept. |
+
+`audit_entry` stays append-only: no role (including `service_role`) holds UPDATE / DELETE / TRUNCATE on it, and the trigger lets a mutation through only inside the erasure function, which sets a transaction-local flag, and only for row deletion or nulling `actor_user_id`.
+
+**`account_deletion_log` retention.** One row per deletion, with no PII: `subject_hash` (SHA-256 of the user id), role, whether the workspace was deleted, and row counts. It is proof that an erasure happened, so it is kept indefinitely; it holds nothing that identifies a person without already knowing their user id. Clients cannot read it (RLS on, no grants).
 
 ## Callback retry (TR-7)
 
