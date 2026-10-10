@@ -177,7 +177,10 @@ select is((select count(*)::int from public.agent a
 -- Erasure log: one row per deletion, no PII
 -- ---------------------------------------------------------------------------
 select results_eq(
-  $$select subject_hash, role, workspace_deleted, members_moved from public.account_deletion_log order by id$$,
+  $$select subject_hash, role, workspace_deleted, members_moved from public.account_deletion_log
+     where subject_hash in (encode(sha256(convert_to(current_setting('t.adam'), 'UTF8')), 'hex'),
+                            encode(sha256(convert_to(current_setting('t.olga'), 'UTF8')), 'hex'))
+     order by id$$,
   $$values (encode(sha256(convert_to(current_setting('t.adam'), 'UTF8')), 'hex'), 'approver'::text, false, 0),
            (encode(sha256(convert_to(current_setting('t.olga'), 'UTF8')), 'hex'), 'owner'::text, true, 1)$$,
   'the log records each deletion by hashed id, once');

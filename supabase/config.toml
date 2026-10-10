@@ -451,5 +451,5 @@ verify_jwt = true
 # The app signs in with an email one-time code (magic links can't open on an
 # emulator), so the magic-link email must include {{ .Token }}.
 [auth.email.template.magic_link]
-subject = "Your Cockpit sign-in code"
+subject = "Your AI Cockpit sign-in code"
 content_path = "./supabase/templates/magic_link.html"

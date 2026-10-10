@@ -1,7 +1,10 @@
-<h2>Sign in to Cockpit</h2>
+<!-- AI Cockpit sign-in email (Supabase Auth "Magic link" template). The app
+     signs in with the code only; there is deliberately no link. The validity
+     must match [auth.email] otp_expiry (3600 s) and the app's otpValidity. -->
+<h2>Sign in to AI Cockpit</h2>
 
-<p>Enter this code in the app:</p>
+<p>Enter this code in the AI Cockpit app:</p>
 <p style="font-size:28px;font-weight:700;letter-spacing:6px;font-family:monospace">{{ .Token }}</p>
 
-<p>Or <a href="{{ .ConfirmationURL }}">sign in with this link</a> on a device that can open it.</p>
-<p>The code expires shortly and can only be used once. If you didn't request it, ignore this email.</p>
+<p>The code is valid for 60 minutes and works once.</p>
+<p>If you didn't ask to sign in, you can ignore this email.</p>

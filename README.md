@@ -192,9 +192,13 @@ Set `FCM_SERVICE_ACCOUNT_JSON` (single-line service-account JSON) in `supabase/f
 
 To turn the downloaded key into a single line: `python -c "import json,sys; print(json.dumps(json.load(open(sys.argv[1]))))" key.json`.
 
-## Deploying (later)
+## Deploying
 
-`supabase link --project-ref <ref>` → `supabase db push` → `supabase functions deploy` (config.toml keeps `actions-inbound` and `callbacks-retry` without JWT verification) → `supabase secrets set PUBLIC_INBOUND_BASE_URL=… FCM_SERVICE_ACCOUNT_JSON=… CRON_SECRET=<random>` → in the SQL editor: `select vault.create_secret('https://<ref>.supabase.co/functions/v1/callbacks-retry', 'cockpit_callbacks_retry_url'); select vault.create_secret('<same CRON_SECRET>', 'cockpit_cron_secret');`. **Never** set `ALLOW_INSECURE_CALLBACKS` in a deployed project, and never load `seed.sql` into one.
+Follow **[docs/DEPLOY.md](docs/DEPLOY.md)**: project setup (ap-south-1), migrations, Vault and function secrets, Auth / SMTP (Resend) / the code-only sign-in email, `scripts/deploy-check.sh` (read-only; prints names, never values), smoke test, rollback, backups and monitoring. Never run `supabase config push` (`config.toml` holds local values) and never load `seed.sql` into a cloud project.
+
+## CI
+
+`.github/workflows/ci.yml` runs on every PR and on `main`: **deno** (lint, type-check, unit tests) and **database** (`supabase start` with Postgres only, pgTAP, `supabase db lint --fail-on warning`). **e2e** (account deletion, push/roles, test action against the full local stack) runs nightly and on demand (*Actions → CI → Run workflow*). `e2e-core-loop` and `e2e-agent-trigger` need a callback receiver on the host and stay local-only.
 
 ## Agent Triggers (feature-flagged)
 

@@ -1,0 +1,128 @@
+name: CI
+
+# Backend CI (F10).
+#   * deno + database run on every PR and on main.
+#   * e2e runs nightly and on demand (workflow_dispatch) only: it needs the
+#     whole local stack plus `functions serve` and takes longer.
+# Versions are pinned to what the repo is developed with; bump them in their
+# own PR.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  schedule:
+    - cron: "30 21 * * *" # 03:00 IST
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  DENO_VERSION: "2.9.6"
+  SUPABASE_CLI_VERSION: "2.117.0"
+
+jobs:
+  deno:
+    name: Deno (lint, check, unit tests)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: denoland/setup-deno@v2
+        with:
+          deno-version: ${{ env.DENO_VERSION }}
+
+      - name: Lint
+        run: deno task lint
+
+      - name: Type-check functions and scripts
+        run: deno check $(git ls-files 'supabase/functions/*.ts' 'supabase/functions/**/*.ts' 'scripts/*.ts')
+
+      - name: Unit tests
+        run: deno task test
+
+  database:
+    name: Database (pgTAP, db lint)
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: supabase/setup-cli@v1
+        with:
+          version: ${{ env.SUPABASE_CLI_VERSION }}
+
+      # Only Postgres is needed for pgTAP and the linter.
+      - name: Start Postgres (migrations + local seed)
+        run: >
+          supabase start
+          -x gotrue,realtime,storage-api,imgproxy,kong,mailpit,postgrest,postgres-meta,studio,edge-runtime,logflare,vector,supavisor
+
+      - name: pgTAP
+        run: supabase test db
+
+      - name: Schema lint
+        run: supabase db lint --level warning --fail-on warning
+
+  e2e:
+    name: End-to-end (local stack)
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    needs: [deno, database]
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: denoland/setup-deno@v2
+        with:
+          deno-version: ${{ env.DENO_VERSION }}
+
+      - uses: supabase/setup-cli@v1
+        with:
+          version: ${{ env.SUPABASE_CLI_VERSION }}
+
+      - name: Start the local stack
+        run: supabase start -x storage-api,imgproxy,logflare,vector,supavisor,studio
+
+      # CI-local values only (the same well-known LOCAL ONLY values as
+      # seed.sql / .env.example); nothing here is a real secret.
+      - name: Functions env (local only)
+        run: |
+          cat > supabase/functions/.env <<'ENV'
+          PUBLIC_INBOUND_BASE_URL=http://127.0.0.1:54321/functions/v1
+          ALLOW_INSECURE_CALLBACKS=true
+          CRON_SECRET=cron_local_dev_only_never_use_in_production
+          ENV
+
+      - name: Serve functions
+        run: |
+          supabase functions serve --no-verify-jwt --env-file supabase/functions/.env > serve.log 2>&1 &
+          for i in $(seq 1 60); do
+            if curl -s -o /dev/null -w '%{http_code}' -X POST http://127.0.0.1:54321/functions/v1/account-delete | grep -qE '^(401|405)$'; then
+              echo "functions are up"; exit 0
+            fi
+            sleep 2
+          done
+          echo "functions did not start"; tail -50 serve.log; exit 1
+
+      # These need no receiver on the host. e2e-core-loop and
+      # e2e-agent-trigger need a callback receiver reachable from the edge
+      # runtime container (host.docker.internal) and stay local-only for now.
+      - name: e2e — account deletion
+        run: bash scripts/e2e-account-delete.sh
+
+      - name: e2e — push token + roles
+        run: bash scripts/e2e-push-roles.sh
+
+      - name: e2e — test action
+        run: bash scripts/e2e-test-action.sh
+
+      - name: Functions log (on failure)
+        if: failure()
+        run: tail -200 serve.log
