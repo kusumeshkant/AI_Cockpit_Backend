@@ -8,6 +8,7 @@ export const MAX_DECISION_BYTES = 128 * 1024;
 export const MAX_CREATE_AGENT_BYTES = 8 * 1024;
 export const MAX_AGENT_REF_BYTES = 1024;
 export const MAX_TRIGGER_CONFIG_BYTES = 4 * 1024;
+export const MAX_ACCOUNT_DELETE_BYTES = 256;
 
 const payloadObject = z.record(z.string(), z.unknown());
 
@@ -19,6 +20,16 @@ export const CreateAgentSchema = z
     callback_url: z.string().url().max(2048).refine((url) => url.startsWith('https://'), {
       message: 'callback_url must use https://',
     }),
+  })
+  .strict();
+
+/**
+ * `account-delete` body. `confirm: true` must be sent explicitly, so a stray or
+ * empty request never deletes an account.
+ */
+export const AccountDeleteSchema = z
+  .object({
+    confirm: z.literal(true),
   })
   .strict();
 
