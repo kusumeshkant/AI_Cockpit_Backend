@@ -18,7 +18,7 @@ How to put the Cockpit backend on a hosted Supabase project, check it, and roll 
 | Sign-in email | code only (no link), subject "Your AI Cockpit sign-in code", valid 60 minutes |
 | SMTP | Resend, sender `no-reply@auth.dqstore.in`, name "AI Cockpit" |
 | Support email | `<SUPPORT_EMAIL>` (placeholder until decided) |
-| Firebase | the existing project (it lists `app.cockpit.cockpit` and `app.cockpit.cockpit.dev`) |
+| Firebase | the existing project; it must list Android apps `app.aicockpit.aicockpit` and `app.aicockpit.aicockpit.dev` (register both, then download a fresh `google-services.json`) |
 | Agent Triggers | **off** in the cloud (`FEATURE_AGENT_TRIGGERS` not set) |
 
 ### Free vs Pro
