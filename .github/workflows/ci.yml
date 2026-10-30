@@ -98,6 +98,9 @@ jobs:
           PUBLIC_INBOUND_BASE_URL=http://127.0.0.1:54321/functions/v1
           ALLOW_INSECURE_CALLBACKS=true
           CRON_SECRET=cron_local_dev_only_never_use_in_production
+          REVIEWER_LOGIN_ENABLED=true
+          REVIEWER_EMAIL=reviewer@test.dev
+          REVIEWER_CODE=246810
           ENV
 
       - name: Serve functions
@@ -122,6 +125,9 @@ jobs:
 
       - name: e2e — test action
         run: bash scripts/e2e-test-action.sh
+
+      - name: e2e — reviewer sign-in
+        run: bash scripts/e2e-reviewer-signin.sh
 
       - name: Functions log (on failure)
         if: failure()

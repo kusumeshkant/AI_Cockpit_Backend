@@ -28,6 +28,8 @@ const EXPECTED = {
     'ALLOW_INSECURE_TRIGGERS',
     'FEATURE_AGENT_TRIGGERS',
   ],
+  // Play review sign-in (reviewer-signin); reported, never required.
+  reviewerSecrets: ['REVIEWER_LOGIN_ENABLED', 'REVIEWER_EMAIL', 'REVIEWER_CODE'],
   vaultSecrets: ['cockpit_callbacks_retry_url', 'cockpit_cron_secret'],
   extensions: ['pg_cron', 'pg_net', 'supabase_vault'],
   cronJob: 'cockpit-callbacks-retry',
@@ -139,6 +141,16 @@ async function managementChecks(ref: string, token: string): Promise<void> {
     }
     for (const name of EXPECTED.forbiddenSecrets) {
       check(!names.has(name), `${name} is not set`, 'must not be set in the cloud');
+    }
+    // Play review sign-in: names only (values aren't readable). A warning, not
+    // a failure: it is meant to be on while a Play review is pending.
+    const reviewerSet = EXPECTED.reviewerSecrets.filter((name) => names.has(name));
+    if (reviewerSet.length === 0) {
+      record('pass', 'reviewer sign-in secrets', 'not set (off)');
+    } else if (reviewerSet.length < EXPECTED.reviewerSecrets.length) {
+      record('warn', 'reviewer sign-in secrets', `partly set (${reviewerSet.join(', ')}): stays off`);
+    } else {
+      record('warn', 'reviewer sign-in secrets', 'set: on if REVIEWER_LOGIN_ENABLED is "true"');
     }
   } catch (error) {
     record('fail', 'list secrets', `Management API ${(error as Error).message}`);
