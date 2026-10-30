@@ -447,6 +447,11 @@ verify_jwt = true
 [functions.account-delete]
 verify_jwt = true
 
+# Play review sign-in. Called before sign-in, so no JWT; off unless the
+# REVIEWER_* secrets are set (see docs/DEPLOY.md, "Play review sign-in").
+[functions.reviewer-signin]
+verify_jwt = false
+
 # ---- Cockpit auth emails ------------------------------------------------------
 # The app signs in with an email one-time code (magic links can't open on an
 # emulator), so the magic-link email must include {{ .Token }}.

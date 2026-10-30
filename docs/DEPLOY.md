@@ -41,7 +41,7 @@ Plan limits and prices change; check supabase.com/pricing before deciding. Free 
 | 1 | Turn on MFA for your Supabase account | Dashboard → Account |
 | 2 | ⚠️ Create the project: region, plan, database password | Dashboard |
 | 3 | Link this repo | CLI |
-| 4 | ⚠️ Apply migrations 0001–0007 | CLI |
+| 4 | ⚠️ Apply migrations 0001–0008 | CLI |
 | 5 | Create the two Vault secrets | SQL editor |
 | 6 | Set the function secrets | CLI |
 | 7 | Deploy the Edge Functions | CLI |
@@ -70,7 +70,7 @@ supabase link --project-ref <PROJECT_REF>   # asks for the database password
 ### 4. Migrations ⚠️
 
 ```bash
-supabase db push --dry-run   # lists 0001…0007; check nothing unexpected
+supabase db push --dry-run   # lists 0001…0008 (or only the new ones); check nothing unexpected
 supabase db push
 ```
 
@@ -119,6 +119,7 @@ supabase secrets list   # shows names and digests only
 | Agent inbound / trigger secrets | Vault, created by the app | — | nothing to do |
 | SMTP password | Dashboard → Auth → SMTP | Resend API key | |
 | Database password | password manager | step 2 | |
+| `REVIEWER_LOGIN_ENABLED`, `REVIEWER_EMAIL`, `REVIEWER_CODE` | `supabase secrets set`, **only while a Play review needs it** | see *Play review sign-in* | unset = off (default) |
 
 ### 7. Deploy the functions
 
@@ -126,7 +127,7 @@ supabase secrets list   # shows names and digests only
 supabase functions deploy
 ```
 
-This deploys every function under `supabase/functions/` with the `verify_jwt` setting from `config.toml`: `actions-inbound` (HMAC) and `callbacks-retry` (cron secret) without JWT verification, all others with it.
+This deploys every function under `supabase/functions/` with the `verify_jwt` setting from `config.toml`: `actions-inbound` (HMAC), `callbacks-retry` (cron secret) and `reviewer-signin` (called before sign-in; off unless its secrets are set) without JWT verification, all others with it.
 
 ### 8. Auth, SMTP and the sign-in email (Dashboard + DNS)
 
@@ -174,7 +175,7 @@ unset SUPABASE_ACCESS_TOKEN SUPABASE_DB_URL
 It checks:
 
 - **Management API:** every function deployed and `ACTIVE` with `config.toml`'s `verify_jwt`; required secrets present by name, `ALLOW_INSECURE_*` / `FEATURE_AGENT_TRIGGERS` absent; Auth site URL, OTP length/expiry, 60 s email frequency, custom SMTP, email rate limit > 2/h, subject and code-only template.
-- **Database:** migrations 0001–0007 applied, extensions, the cron job active, both Vault secrets present, the retry URL pointing at this project, the cron secret not the seed value, RLS on every public table, SELECT-only policies never for `anon`, no extra functions executable by `anon`, no app role able to mutate `audit_entry`, no seed user/agent.
+- **Database:** migrations 0001–0008 applied, extensions, the cron job active, both Vault secrets present, the retry URL pointing at this project, the cron secret not the seed value, RLS on every public table, SELECT-only policies never for `anon`, no extra functions executable by `anon`, no app role able to mutate `audit_entry`, no seed user/agent.
 
 Fix every ✗ before going on. A `!` means the API didn't report a setting; check it in the Dashboard.
 
@@ -207,6 +208,32 @@ Prod release builds stop in Gradle without `SUPABASE_URL`, `SUPABASE_ANON_KEY`, 
 ```bash
 flutter build appbundle --release --flavor prod --dart-define-from-file=env/prod.json
 ```
+
+## Play review sign-in
+
+The app signs in with an emailed code, which a Google Play reviewer can't read. `reviewer-signin` (migration 0008) accepts **one fixed 6-digit code for one allowlisted email**, so the reviewer can sign in through the normal sign-in screen. It is **off by default** and switched on only by function secrets.
+
+How it works: when the normal code check fails, the app posts `{email, code}` to `reviewer-signin`. Only if `REVIEWER_LOGIN_ENABLED` is exactly `true` and both match `REVIEWER_EMAIL` / `REVIEWER_CODE` does it return a one-time token hash, which the app exchanges for a normal session (no email is sent). Every other request (off, another email, wrong code, locked, malformed) gets the **identical** `400 invalid_code`. Wrong codes for the reviewer email count in `reviewer_signin_guard`: **5 within 15 minutes lock it for 1 hour**. Other emails never count, so nobody who doesn't know the reviewer email can guess the code or lock it.
+
+**Set up (once)**
+1. Sign in to the prod app once with the reviewer mailbox (`kusumeshkantsharma+playreview@gmail.com`) using a real emailed code; this creates its own workspace.
+2. In that account: connect a "Demo agent" (callback `https://aicockpit.dqstore.in/api/demo-callback`) and use **Send test action** two or three times so the feed has pending items.
+
+**Turn on** (values typed in your shell, kept in the password manager, never committed):
+
+```bash
+supabase secrets set REVIEWER_EMAIL='kusumeshkantsharma+playreview@gmail.com'
+supabase secrets set REVIEWER_CODE="$(LC_ALL=C tr -dc 0-9 </dev/urandom | head -c 6)"   # note it before closing the shell
+supabase secrets set REVIEWER_LOGIN_ENABLED=true
+```
+
+Enter the email and code in Play Console → App content → Sign-in details. Google reviews **every** update, so either keep it on and set a new code for each submission, or turn it on before each submission and off after approval.
+
+**Turn off:** `supabase secrets unset REVIEWER_LOGIN_ENABLED` (takes effect on the next request; no app build). To remove it completely, also unset `REVIEWER_EMAIL` and `REVIEWER_CODE` and delete the review account in the app.
+
+**If it is locked** (5 wrong codes): wait an hour, or clear it in the SQL editor: `update public.reviewer_signin_guard set failures = 0, window_start = null, locked_until = null;`
+
+**Check:** `scripts/deploy-check.sh` reports whether the reviewer secrets are set (names only). Logs show `reviewer_signin` with `ok` / `denied` / `locked` and never the email or code.
 
 ## Rollback
 
