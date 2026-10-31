@@ -175,9 +175,10 @@ select throws_ok(
          current_setting('t.agent_a')),
   '42501', null, 'RLS: clients cannot insert actions');
 
-select lives_ok(
+-- Since 0009 clients hold no UPDATE at all (before, RLS matched no rows).
+select throws_ok(
   $$update public.action set title = 'hacked'$$,
-  'RLS: client update runs but matches no rows');
+  '42501', null, 'clients cannot update actions');
 
 select throws_ok(
   format($$insert into public.audit_entry (workspace_id, action_id, event)
