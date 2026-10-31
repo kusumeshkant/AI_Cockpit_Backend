@@ -6,7 +6,8 @@
 //   2. Count it against the agent's inbound rate limit (429 rate_limited).
 //   3. record_action_inbound with external_id `test-<uuid>` and a canned email
 //      payload (editable subject/body) — the same path as a real agent, so
-//      it's audited, streamed to the feed and pushed.
+//      it's audited, streamed to the feed and pushed. It expires after
+//      TEST_ACTION_TTL_DAYS (14), so it stays pending for a store reviewer.
 //   4. Approving it calls back the agent's callback_url like any action.
 import { loadEnv } from '../_shared/env.ts';
 import { AppError, fromPostgrest } from '../_shared/errors.ts';
@@ -15,23 +16,11 @@ import { log } from '../_shared/logger.ts';
 import { notifyNewAction } from '../_shared/push.ts';
 import { enforceRateLimit } from '../_shared/rate_limit.ts';
 import { serviceClient, userIdFromReq } from '../_shared/supabase.ts';
+import { TEST_ACTION, testActionExpiresAt } from '../_shared/test_action.ts';
 import type { AgentStatus, TestActionResponse } from '../_shared/types.ts';
 import { AgentRefSchema, MAX_AGENT_REF_BYTES } from '../_shared/validation.ts';
 
 const env = loadEnv();
-
-/** Canned action. `external_id` is added per request. */
-const TEST_ACTION = {
-  type: 'email',
-  title: 'Test action from Cockpit',
-  summary: 'A sample email so you can try approve, edit and reject.',
-  payload: {
-    to: 'customer@example.com',
-    subject: 'Thanks for reaching out',
-    body: 'Hi there,\n\nThanks for getting in touch — we will get back to you within one business day.\n\nBest regards',
-  },
-  editable_fields: ['subject', 'body'],
-} as const;
 
 Deno.serve(
   handler('agents-test-action', async (req) => {
@@ -59,7 +48,7 @@ Deno.serve(
         p_payload: TEST_ACTION.payload,
         p_editable_fields: TEST_ACTION.editable_fields,
         p_callback_url: null,
-        p_expires_at: null,
+        p_expires_at: testActionExpiresAt(),
       })
       .single<{ action_id: string; is_new: boolean; fcm_tokens: string[] }>();
     if (error) throw fromPostgrest(error);

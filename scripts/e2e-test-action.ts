@@ -167,12 +167,19 @@ async function main(): Promise<void> {
     sent.body,
   );
   const [row] = await rest(
-    `action?id=eq.${sent.body.data.action_id}&select=status,agent_id,external_id`,
+    `action?id=eq.${sent.body.data.action_id}&select=status,agent_id,external_id,expires_at`,
   );
   check(
     row?.status === 'pending' && row.agent_id === ownAgent &&
       String(row.external_id).startsWith('test-'),
     'action is pending on the own agent with a test- external_id',
+    row,
+  );
+  const ttlMs = Date.parse(row?.expires_at) - Date.now();
+  const fourteenDaysMs = 14 * 24 * 60 * 60 * 1000;
+  check(
+    Math.abs(ttlMs - fourteenDaysMs) < 10 * 60 * 1000,
+    'test action expires in 14 days (stays pending for a store reviewer)',
     row,
   );
 

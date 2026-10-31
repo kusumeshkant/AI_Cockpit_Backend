@@ -219,7 +219,7 @@ How it works: when the normal code check fails, the app posts `{email, code}` to
 
 **Set up (once)**
 1. Sign in to the prod app once with the reviewer mailbox (`kusumeshkantsharma+playreview@gmail.com`) using a real emailed code; this creates its own workspace.
-2. In that account: connect a "Demo agent" (callback `https://aicockpit.dqstore.in/api/demo-callback`) and use **Send test action** two or three times so the feed has pending items.
+2. In that account: connect a "Demo agent" (callback `https://aicockpit.dqstore.in/api/demo-callback`) and use **Send test action** two or three times so the feed has pending items. Test actions stay pending for **14 days** (`TEST_ACTION_TTL_DAYS`, `_shared/test_action.ts`), then expire; send fresh ones if a review starts later than that. Before 2026-10-31 they had no expiry: older samples stay pending until decided.
 
 **Turn on** (values typed in your shell, kept in the password manager, never committed):
 
