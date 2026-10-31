@@ -33,13 +33,97 @@ const EXPECTED = {
   vaultSecrets: ['cockpit_callbacks_retry_url', 'cockpit_cron_secret'],
   extensions: ['pg_cron', 'pg_net', 'supabase_vault'],
   cronJob: 'cockpit-callbacks-retry',
-  // Public functions anon may execute: harmless by design.
-  anonFunctionsAllowed: ['audit_entry_forbid_mutation', 'current_workspace_id'],
   // seed.sql (LOCAL ONLY) leftovers that must never exist in the cloud.
   seedUserId: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
   seedAgentId: 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb',
   seedCronSecret: 'cron_local_dev_only_never_use_in_production',
 };
+
+// The Data API privilege matrix of migration 0009, as "role|object|privilege"
+// keys. Same matrix as supabase/tests/privileges_test.sql — keep in sync.
+const SERVICE_DML_TABLES = [
+  'workspace', 'app_user', 'agent', 'action', 'agent_rate', 'agent_trigger',
+  'trigger_run', 'account_deletion_log', 'reviewer_signin_guard',
+];
+const AUTHENTICATED_COLUMNS: Record<string, string[]> = {
+  app_user: ['id', 'email', 'workspace_id', 'role'],
+  workspace: ['id', 'plan'],
+  agent: ['id', 'name', 'platform', 'callback_url', 'status', 'secret_hint', 'last_action_at', 'created_at'],
+  action: [
+    'id', 'agent_id', 'type', 'title', 'summary', 'payload', 'editable_fields',
+    'status', 'decision', 'decided_at', 'expires_at', 'created_at',
+  ],
+  audit_entry: ['id', 'action_id', 'event', 'decision', 'reason', 'edited_payload', 'metadata', 'created_at'],
+  agent_trigger: [
+    'agent_id', 'workspace_id', 'trigger_url', 'secret_hint', 'enabled',
+    'min_interval_secs', 'created_at', 'updated_at',
+  ],
+};
+const EXPECTED_PRIVILEGES = {
+  tables: [...SERVICE_DML_TABLES, 'audit_entry'].sort(),
+  tableGrants: [
+    ...SERVICE_DML_TABLES.flatMap((t) =>
+      ['SELECT', 'INSERT', 'UPDATE', 'DELETE'].map((p) => `service_role|${t}|${p}`)
+    ),
+    'service_role|audit_entry|SELECT',
+    'service_role|audit_entry|INSERT',
+    'authenticated|trigger_run|SELECT',
+  ],
+  columnGrants: Object.entries(AUTHENTICATED_COLUMNS).flatMap(([t, cols]) =>
+    cols.map((c) => `authenticated|${t}.${c}|SELECT`)
+  ),
+  functionGrants: [
+    'authenticated|current_workspace_id()',
+    'authenticated|register_fcm_token(text)',
+    'authenticated|unregister_fcm_token(text)',
+    ...[
+      'register_fcm_token(text)',
+      'unregister_fcm_token(text)',
+      'prune_fcm_tokens(text[])',
+      'create_agent(uuid, text, text, text, text)',
+      'get_agent_inbound_context(uuid)',
+      'record_action_inbound(uuid, text, text, text, text, jsonb, text[], text, timestamp with time zone)',
+      'record_decision(uuid, uuid, text, jsonb, text, text)',
+      'record_callback_result(uuid, boolean, text, integer)',
+      'claim_due_callbacks(integer, integer)',
+      'get_owned_agent(uuid, uuid)',
+      'rotate_agent_secret(uuid, uuid, text)',
+      'hit_rate_limit(uuid, integer, interval)',
+      'configure_agent_trigger(uuid, uuid, text, text, integer)',
+      'set_agent_trigger_enabled(uuid, uuid, boolean)',
+      'begin_trigger_run(uuid, uuid)',
+      'record_trigger_result(uuid, boolean, text)',
+      'delete_account_data(uuid)',
+      'reviewer_signin_attempt(text)',
+    ].map((fn) => `service_role|${fn}`),
+  ],
+};
+
+/** Keys in [expected] but not [actual] (missing) and the reverse (extra). */
+function diffKeys(expected: string[], actual: string[]): { missing: string[]; extra: string[] } {
+  const want = new Set(expected);
+  const have = new Set(actual);
+  return {
+    missing: [...want].filter((k) => !have.has(k)).sort(),
+    extra: [...have].filter((k) => !want.has(k)).sort(),
+  };
+}
+
+function diffNote({ missing, extra }: { missing: string[]; extra: string[] }): string {
+  return [
+    missing.length ? `missing: ${missing.join(', ')}` : '',
+    extra.length ? `extra: ${extra.join(', ')}` : '',
+  ].filter(Boolean).join('; ');
+}
+
+const matches = (d: { missing: string[]; extra: string[] }) =>
+  d.missing.length === 0 && d.extra.length === 0;
+
+// Roles of the matrix; grantee 0 is PUBLIC.
+const APP_GRANTEES_SQL = `
+  select 0::oid as oid, 'PUBLIC'::text as name
+  union all select oid, rolname::text from pg_roles
+   where rolname in ('anon', 'authenticated', 'service_role')`;
 
 type Status = 'pass' | 'fail' | 'warn' | 'skip';
 const results: { status: Status; name: string; note?: string }[] = [];
@@ -277,15 +361,89 @@ async function databaseChecks(url: string, ref: string | undefined): Promise<voi
         'policies are SELECT-only and never for anon',
         `check: ${loose.map((r: any) => r.tablename).join(', ')}`,
       );
-      const anonFns = (await tx`
-        select p.proname from pg_proc p join pg_namespace n on n.oid = p.pronamespace
-         where n.nspname = 'public' and has_function_privilege('anon', p.oid, 'execute')`)
-        .map((r: any) => r.proname as string)
-        .filter((name: string) => !EXPECTED.anonFunctionsAllowed.includes(name));
+      section('Data API privileges (0009 matrix; names only)');
+      const keys = (rows: any[]) => rows.map((r: any) => r.key as string);
+      const tables = keys(await tx`
+        select c.relname as key from pg_class c join pg_namespace n on n.oid = c.relnamespace
+         where n.nspname = 'public' and c.relkind in ('r', 'p', 'v', 'm', 'f')`);
+      const tableDiff = diffKeys(EXPECTED_PRIVILEGES.tables, tables);
       check(
-        anonFns.length === 0,
-        'anon can execute no other public function',
-        `also: ${anonFns.join(', ')}`,
+        matches(tableDiff),
+        'public tables are exactly the ones the matrix covers',
+        diffNote(tableDiff),
+      );
+      const tableGrants = keys(await tx.unsafe(`
+        with g as (${APP_GRANTEES_SQL})
+        select g.name || '|' || c.relname || '|' || a.privilege_type as key
+          from pg_class c
+          join pg_namespace n on n.oid = c.relnamespace
+          cross join lateral aclexplode(coalesce(c.relacl, acldefault('r', c.relowner))) a
+          join g on g.oid = a.grantee
+         where n.nspname = 'public' and c.relkind in ('r', 'p', 'v', 'm', 'f')`));
+      const tableGrantDiff = diffKeys(EXPECTED_PRIVILEGES.tableGrants, tableGrants);
+      check(
+        matches(tableGrantDiff),
+        'table privileges match (no TRUNCATE / REFERENCES / TRIGGER, nothing for anon)',
+        diffNote(tableGrantDiff),
+      );
+      const columnGrants = keys(await tx.unsafe(`
+        with g as (${APP_GRANTEES_SQL})
+        select g.name || '|' || c.relname || '.' || att.attname || '|' || a.privilege_type as key
+          from pg_attribute att
+          join pg_class c on c.oid = att.attrelid
+          join pg_namespace n on n.oid = c.relnamespace
+          cross join lateral aclexplode(att.attacl) a
+          join g on g.oid = a.grantee
+         where n.nspname = 'public' and att.attnum > 0 and not att.attisdropped`));
+      const columnDiff = diffKeys(EXPECTED_PRIVILEGES.columnGrants, columnGrants);
+      check(
+        matches(columnDiff),
+        'column privileges match (authenticated reads exactly the app’s columns)',
+        diffNote(columnDiff),
+      );
+      const sequenceGrants = keys(await tx.unsafe(`
+        with g as (${APP_GRANTEES_SQL})
+        select g.name || '|' || c.relname || '|' || a.privilege_type as key
+          from pg_class c
+          join pg_namespace n on n.oid = c.relnamespace
+          cross join lateral aclexplode(coalesce(c.relacl, acldefault('s', c.relowner))) a
+          join g on g.oid = a.grantee
+         where n.nspname = 'public' and c.relkind = 'S'`));
+      check(
+        sequenceGrants.length === 0,
+        'no app role holds a privilege on a public sequence',
+        `extra: ${sequenceGrants.join(', ')}`,
+      );
+      const functionGrants = keys(await tx.unsafe(`
+        with g as (${APP_GRANTEES_SQL})
+        select g.name || '|' || p.proname || '(' || oidvectortypes(p.proargtypes) || ')' as key
+          from pg_proc p
+          join pg_namespace n on n.oid = p.pronamespace
+          cross join lateral aclexplode(coalesce(p.proacl, acldefault('f', p.proowner))) a
+          join g on g.oid = a.grantee
+         where n.nspname = 'public'
+           and not exists (select 1 from pg_depend d
+                            where d.classid = 'pg_proc'::regclass and d.objid = p.oid
+                              and d.deptype = 'e')`));
+      const functionDiff = diffKeys(EXPECTED_PRIVILEGES.functionGrants, functionGrants);
+      check(
+        matches(functionDiff),
+        'function EXECUTE matches (nothing for anon / PUBLIC)',
+        diffNote(functionDiff),
+      );
+      const defaults = keys(await tx.unsafe(`
+        with g as (${APP_GRANTEES_SQL})
+        select g.name || '|' || d.defaclobjtype::text || '|' || a.privilege_type as key
+          from pg_default_acl d
+          left join pg_namespace n on n.oid = d.defaclnamespace
+          cross join lateral aclexplode(d.defaclacl) a
+          join g on g.oid = a.grantee
+         where d.defaclrole = 'postgres'::regrole
+           and (d.defaclnamespace = 0 or n.nspname = 'public')`));
+      check(
+        defaults.length === 0,
+        'new public objects get no default grants (postgres default privileges)',
+        `extra: ${defaults.join(', ')}`,
       );
       const [audit] = await tx`
         select bool_or(has_table_privilege(r, 'public.audit_entry', p)) as writable

@@ -41,7 +41,7 @@ Plan limits and prices change; check supabase.com/pricing before deciding. Free 
 | 1 | Turn on MFA for your Supabase account | Dashboard → Account |
 | 2 | ⚠️ Create the project: region, plan, database password | Dashboard |
 | 3 | Link this repo | CLI |
-| 4 | ⚠️ Apply migrations 0001–0008 | CLI |
+| 4 | ⚠️ Apply migrations 0001–0009 | CLI |
 | 5 | Create the two Vault secrets | SQL editor |
 | 6 | Set the function secrets | CLI |
 | 7 | Deploy the Edge Functions | CLI |
@@ -70,11 +70,13 @@ supabase link --project-ref <PROJECT_REF>   # asks for the database password
 ### 4. Migrations ⚠️
 
 ```bash
-supabase db push --dry-run   # lists 0001…0008 (or only the new ones); check nothing unexpected
+supabase db push --dry-run   # lists 0001…0009 (or only the new ones); check nothing unexpected
 supabase db push
 ```
 
 Migrations only go forward: a mistake is fixed with a new migration, never by editing an applied one. They create the tables, RLS, RPCs, the `pg_cron` / `pg_net` / `supabase_vault` extensions and the `cockpit-callbacks-retry` cron job (every minute). The job does nothing until step 5 is done.
+
+**Grants (0009).** The app's reads only work through explicit grants: a cloud project does not hand out the default table grants the local stack has, and without them every signed-in read fails with `42501` (sign-in then looks like it fails). Migration 0009 revokes everything from `anon` / `authenticated` / `service_role` / `PUBLIC` and grants exactly the matrix in its header: `authenticated` reads only the columns the app selects (never `app_user.fcm_tokens` or Vault secret ids) under RLS, writes nothing directly, and executes only `current_workspace_id()`, `register_fcm_token`, `unregister_fcm_token`; `service_role` has DML (on `audit_entry` only SELECT / INSERT) and the Edge Functions' RPCs; `anon` has nothing; no app role holds TRUNCATE / REFERENCES / TRIGGER. It also removes the default grants for new objects, so every later migration must grant explicitly. Never grant in the Dashboard by hand: add a migration, update the matrix in `supabase/tests/privileges_test.sql` and `scripts/deploy-check.ts`, and run deploy-check after the push.
 
 ### 5. Vault secrets (SQL editor)
 
@@ -175,7 +177,7 @@ unset SUPABASE_ACCESS_TOKEN SUPABASE_DB_URL
 It checks:
 
 - **Management API:** every function deployed and `ACTIVE` with `config.toml`'s `verify_jwt`; required secrets present by name, `ALLOW_INSECURE_*` / `FEATURE_AGENT_TRIGGERS` absent; Auth site URL, OTP length/expiry, 60 s email frequency, custom SMTP, email rate limit > 2/h, subject and code-only template.
-- **Database:** migrations 0001–0008 applied, extensions, the cron job active, both Vault secrets present, the retry URL pointing at this project, the cron secret not the seed value, RLS on every public table, SELECT-only policies never for `anon`, no extra functions executable by `anon`, no app role able to mutate `audit_entry`, no seed user/agent.
+- **Database:** migrations 0001–0009 applied, extensions, the cron job active, both Vault secrets present, the retry URL pointing at this project, the cron secret not the seed value, RLS on every public table, SELECT-only policies never for `anon`, the 0009 privilege matrix exactly (tables, columns, sequences, function EXECUTE, no default grants for new objects; a mismatch lists the role / object / privilege names), no app role able to mutate `audit_entry`, no seed user/agent.
 
 Fix every ✗ before going on. A `!` means the API didn't report a setting; check it in the Dashboard.
 
@@ -265,7 +267,7 @@ Enter the email and code in Play Console → App content → Sign-in details. Go
 
 - [ ] MFA on the Supabase account; long database password in a password manager.
 - [ ] RLS on every public table; policies SELECT-only and never for `anon` (deploy-check).
-- [ ] `anon` executes no RPC beyond the harmless allow-list; `authenticated` only `register_fcm_token` / `unregister_fcm_token`; `audit_entry` immutable for every app role (deploy-check).
+- [ ] Privileges match the 0009 matrix: `anon` nothing; `authenticated` only the app's columns plus `current_workspace_id` / `register_fcm_token` / `unregister_fcm_token`; `audit_entry` immutable for every app role (deploy-check).
 - [ ] service_role key only inside Edge Functions.
 - [ ] The anon key is public: with it, anyone can request a sign-in code and read REST under RLS (nothing without a session); every app-facing function requires a JWT; `actions-inbound` needs a valid HMAC and `callbacks-retry` the cron secret.
 - [ ] No CORS headers on functions: browsers can't call them (native app only). Revisit if a web client is added.
