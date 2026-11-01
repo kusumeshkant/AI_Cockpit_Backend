@@ -436,7 +436,7 @@ verify_jwt = true
 [functions.callbacks-retry]
 verify_jwt = false
 
-# Agent Triggers (behind FEATURE_AGENT_TRIGGERS). Called by the signed-in app.
+# Agent Triggers (behind the agent_triggers feature_setting row). Called by the signed-in app.
 [functions.agents-configure-trigger]
 verify_jwt = true
 

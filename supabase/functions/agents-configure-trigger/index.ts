@@ -1,7 +1,8 @@
 // Supabase Edge Function: agents-configure-trigger  (JWT — signed-in owner)
 //
-// Agent Triggers, behind FEATURE_AGENT_TRIGGERS (404 feature_disabled when
-// off, before any DB access). Body `action`:
+// Agent Triggers, behind the `agent_triggers` feature_setting row
+// (FEATURE_AGENT_TRIGGERS only when the row is missing; 404 feature_disabled
+// when off, before auth or any RPC). Body `action`:
 //   configure    { agent_id, trigger_url, min_interval_secs? } — mints a
 //                'whtrig_' secret, stores it in Vault inside
 //                configure_agent_trigger (same transaction) and returns the
@@ -11,6 +12,7 @@
 // relaxed only by ALLOW_INSECURE_TRIGGERS for local development.
 import { loadEnv } from '../_shared/env.ts';
 import { AppError, fromPostgrest } from '../_shared/errors.ts';
+import { isFeatureEnabled } from '../_shared/flags.ts';
 import { guardMethod, handler, json, parseJson, readRawBody } from '../_shared/http.ts';
 import { log } from '../_shared/logger.ts';
 import { serviceClient, userIdFromReq } from '../_shared/supabase.ts';
@@ -29,7 +31,7 @@ const DEFAULT_MIN_INTERVAL_SECS = 30;
 
 Deno.serve(
   handler('agents-configure-trigger', async (req) => {
-    if (!env.featureAgentTriggers) {
+    if (!(await isFeatureEnabled('agent_triggers'))) {
       throw new AppError('feature_disabled', 'Agent triggers are not enabled');
     }
 

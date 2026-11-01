@@ -1,16 +1,18 @@
 #!/usr/bin/env bash
 # End-to-end check of Agent Triggers against the local Supabase stack, with
-# FEATURE_AGENT_TRIGGERS on and then off.
+# the `agent_triggers` feature_setting row (0010) on and then off.
 #
 # Prerequisites (from product/backend/):
 #   supabase start && supabase db reset   (or `supabase migration up`)
 #   Stop any running `supabase functions serve` first: this script serves the
-#   functions itself, twice, from temporary env files derived from
-#   supabase/functions/.env:
-#     on  — adds FEATURE_AGENT_TRIGGERS=true and ALLOW_INSECURE_TRIGGERS=true
-#           (so the local receiver's http:// URL is allowed)
-#     off — removes both flags
-#   Nothing is written to supabase/functions/.env.
+#   functions itself, twice (fresh isolates, so no cached flag value carries
+#   over), from temporary env files derived from supabase/functions/.env:
+#     on  — row on (scripts/set-feature.ts); env without FEATURE_AGENT_TRIGGERS,
+#           plus ALLOW_INSECURE_TRIGGERS=true (the local receiver is http://)
+#     off — row off; env WITH FEATURE_AGENT_TRIGGERS=true, to prove the row
+#           wins over the old env variable; no ALLOW_INSECURE_TRIGGERS
+#   The row is set back to off on exit. Nothing is written to
+#   supabase/functions/.env.
 #
 # Usage: scripts/e2e-agent-trigger.sh
 set -euo pipefail
@@ -34,6 +36,7 @@ SERVE_PID=""
 KEEP_WORK=0
 cleanup() {
   stop_serve
+  set_flag off >/dev/null 2>&1 || true
   if [[ "$KEEP_WORK" == 1 ]]; then echo "serve logs kept in $WORK" >&2; else rm -rf "$WORK"; fi
 }
 trap cleanup EXIT
@@ -42,6 +45,9 @@ trap cleanup EXIT
 native_path() { if command -v cygpath >/dev/null 2>&1; then cygpath -w "$1"; else echo "$1"; fi; }
 
 strip_flags() { grep -vE '^(FEATURE_AGENT_TRIGGERS|ALLOW_INSECURE_TRIGGERS)=' "$BASE_ENV" || true; }
+
+# The DB row is the switch (service role from `supabase status`, never printed).
+set_flag() { "${DENO[@]}" run --allow-net --allow-env scripts/set-feature.ts agent_triggers "$1"; }
 
 is_windows() { case "$(uname -s)" in MINGW* | MSYS* | CYGWIN*) return 0 ;; *) return 1 ;; esac; }
 
@@ -89,17 +95,19 @@ start_serve() {
 run_mode() {
   local mode="$1"
   echo
-  echo "════ FEATURE_AGENT_TRIGGERS: $mode ════"
+  echo "════ feature_setting agent_triggers: $mode ════"
   TRIGGER_FLAG="$mode" "${DENO[@]}" run --allow-net --allow-env --allow-read --allow-run scripts/e2e-agent-trigger.ts ||
     { KEEP_WORK=1; exit 1; }
 }
 
-{ strip_flags; echo 'FEATURE_AGENT_TRIGGERS=true'; echo 'ALLOW_INSECURE_TRIGGERS=true'; } >"$WORK/on.env"
-strip_flags >"$WORK/off.env"
+{ strip_flags; echo 'ALLOW_INSECURE_TRIGGERS=true'; } >"$WORK/on.env"
+{ strip_flags; echo 'FEATURE_AGENT_TRIGGERS=true'; } >"$WORK/off.env"
 
+set_flag on
 start_serve "$WORK/on.env" "$WORK/serve-on.log"
 run_mode on
 
+set_flag off
 start_serve "$WORK/off.env" "$WORK/serve-off.log"
 run_mode off
 

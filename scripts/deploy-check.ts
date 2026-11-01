@@ -22,11 +22,14 @@ const EXPECTED = {
   emailMaxFrequencySeconds: 60,
   requiredSecrets: ['PUBLIC_INBOUND_BASE_URL', 'CRON_SECRET'],
   optionalSecrets: ['FCM_SERVICE_ACCOUNT_JSON'],
-  // Local-only switches and the Agent Triggers flag (off in the cloud for now).
+  // Local-only switches and the old Agent Triggers env flag: since 0010 the
+  // feature_setting row decides, and the env variable is only a fallback for
+  // a missing row, so it stays forbidden in the cloud.
   forbiddenSecrets: [
     'ALLOW_INSECURE_CALLBACKS',
     'ALLOW_INSECURE_TRIGGERS',
     'FEATURE_AGENT_TRIGGERS',
+    'FEATURE_AGENT_SERVICES',
   ],
   // Play review sign-in (reviewer-signin); reported, never required.
   reviewerSecrets: ['REVIEWER_LOGIN_ENABLED', 'REVIEWER_EMAIL', 'REVIEWER_CODE'],
@@ -43,7 +46,7 @@ const EXPECTED = {
 // keys. Same matrix as supabase/tests/privileges_test.sql — keep in sync.
 const SERVICE_DML_TABLES = [
   'workspace', 'app_user', 'agent', 'action', 'agent_rate', 'agent_trigger',
-  'trigger_run', 'account_deletion_log', 'reviewer_signin_guard',
+  'trigger_run', 'account_deletion_log', 'reviewer_signin_guard', 'feature_setting',
 ];
 const AUTHENTICATED_COLUMNS: Record<string, string[]> = {
   app_user: ['id', 'email', 'workspace_id', 'role'],
@@ -58,7 +61,10 @@ const AUTHENTICATED_COLUMNS: Record<string, string[]> = {
     'agent_id', 'workspace_id', 'trigger_url', 'secret_hint', 'enabled',
     'min_interval_secs', 'created_at', 'updated_at',
   ],
+  feature_setting: ['key', 'enabled', 'min_app_version'], // 0010
 };
+// 0010: feature flags that must have a row (names only; on/off is not checked).
+const EXPECTED_FEATURE_KEYS = ['agent_services', 'agent_triggers'];
 const EXPECTED_PRIVILEGES = {
   tables: [...SERVICE_DML_TABLES, 'audit_entry'].sort(),
   tableGrants: [
@@ -454,6 +460,14 @@ async function databaseChecks(url: string, ref: string | undefined): Promise<voi
         'audit_entry: no app role can UPDATE / DELETE / TRUNCATE',
         'a role can mutate it',
       );
+
+      section('Feature flags (0010; names only)');
+      const featureKeys = (await tx`select key from public.feature_setting`).map((r: any) =>
+        r.key as string
+      );
+      for (const key of EXPECTED_FEATURE_KEYS) {
+        check(featureKeys.includes(key), `feature_setting row ${key}`, 'missing: env fallback applies');
+      }
 
       section('No local seed data');
       const [seed] = await tx`

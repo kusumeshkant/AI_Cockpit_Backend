@@ -3,7 +3,8 @@
 -- out default grants the cloud project doesn't, which hid a missing GRANT
 -- (prod sign-in: 42501 on the profile read). Any drift — a missing grant or
 -- an extra one — fails here. Keep in sync with 0009's header and
--- scripts/deploy-check.ts (EXPECTED_PRIVILEGES).
+-- scripts/deploy-check.ts (EXPECTED_PRIVILEGES). Later migrations extend it:
+-- 0010 feature_setting.
 begin;
 create extension if not exists pgtap with schema extensions;
 
@@ -23,7 +24,7 @@ select set_eq(
      where n.nspname = 'public' and c.relkind in ('r', 'p', 'v', 'm', 'f')$$,
   $$values ('workspace'), ('app_user'), ('agent'), ('action'), ('audit_entry'),
            ('agent_rate'), ('agent_trigger'), ('trigger_run'),
-           ('account_deletion_log'), ('reviewer_signin_guard')$$,
+           ('account_deletion_log'), ('reviewer_signin_guard'), ('feature_setting')$$,
   'every public table and view is covered by the matrix (add new ones here and in 0009)');
 
 select set_eq(
@@ -36,7 +37,7 @@ select set_eq(
   $$select 'service_role' as role, t as tbl, p as priv
       from unnest(array['workspace', 'app_user', 'agent', 'action', 'agent_rate',
                         'agent_trigger', 'trigger_run', 'account_deletion_log',
-                        'reviewer_signin_guard']) t,
+                        'reviewer_signin_guard', 'feature_setting']) t,
            unnest(array['SELECT', 'INSERT', 'UPDATE', 'DELETE']) p
     union all select * from (values ('service_role', 'audit_entry', 'SELECT'),
                      ('service_role', 'audit_entry', 'INSERT'),
@@ -63,7 +64,8 @@ select set_eq(
         ('audit_entry',   array['id', 'action_id', 'event', 'decision', 'reason',
                                 'edited_payload', 'metadata', 'created_at']),
         ('agent_trigger', array['agent_id', 'workspace_id', 'trigger_url', 'secret_hint',
-                                'enabled', 'min_interval_secs', 'created_at', 'updated_at'])
+                                'enabled', 'min_interval_secs', 'created_at', 'updated_at']),
+        ('feature_setting', array['key', 'enabled', 'min_app_version'])
       ) m(t, cols), unnest(m.cols) col$$,
   'column-level privileges: authenticated reads exactly the columns the app selects');
 

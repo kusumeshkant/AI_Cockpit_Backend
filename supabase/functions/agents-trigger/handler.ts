@@ -3,6 +3,7 @@
 import type { SupabaseClient } from '../_shared/deps.ts';
 import type { Env } from '../_shared/env.ts';
 import { AppError, fromPostgrest } from '../_shared/errors.ts';
+import type { FeatureFlags } from '../_shared/flags.ts';
 import { guardMethod, handler, json, parseJson, readRawBody } from '../_shared/http.ts';
 import { log } from '../_shared/logger.ts';
 import { buildTriggerPayload, deliverTrigger, type TriggerOutcome } from '../_shared/trigger.ts';
@@ -20,7 +21,9 @@ interface BeginRow {
 
 /** What the handler needs; injectable for tests. */
 export interface TriggerDeps {
-  env: Pick<Env, 'featureAgentTriggers' | 'allowInsecureTriggers'>;
+  env: Pick<Env, 'allowInsecureTriggers'>;
+  /** Feature flags (0010: DB row, env fallback, fail closed). */
+  flags: Pick<FeatureFlags, 'isEnabled'>;
   /** Called lazily: the flag-off path must not create a client. */
   client: () => Pick<SupabaseClient, 'rpc'>;
   userId: (req: Request) => Promise<string>;
@@ -31,8 +34,9 @@ export interface TriggerDeps {
 /** Builds the `agents-trigger` handler. */
 export function createTriggerHandler(deps: TriggerDeps): (req: Request) => Promise<Response> {
   return handler('agents-trigger', async (req) => {
-    // Feature flag first: no DB access and no I/O while it is off.
-    if (!deps.env.featureAgentTriggers) {
+    // Feature flag first: while it is off, only the (cached) flag read
+    // happens — no auth, no RPC, no outbound I/O.
+    if (!(await deps.flags.isEnabled('agent_triggers'))) {
       throw new AppError('feature_disabled', 'Agent triggers are not enabled');
     }
 

@@ -1,7 +1,8 @@
 // deno-lint-ignore-file no-explicit-any -- responses are untyped JSON inspected ad hoc by assertions.
 // End-to-end test of Agent Triggers (app → agent) against the local stack.
-// Run through scripts/e2e-agent-trigger.sh, which serves the functions twice
-// (flag on, then off) and sets TRIGGER_FLAG accordingly.
+// Run through scripts/e2e-agent-trigger.sh, which sets the feature_setting row
+// and serves the functions twice (flag on, then off) with TRIGGER_FLAG set
+// accordingly.
 //
 // Env: API_URL, ANON_KEY, SERVICE_ROLE_KEY, TRIGGER_FLAG=on|off
 // Optional: TRIGGER_PORT (default 8790), CALLBACK_HOST (default
@@ -257,6 +258,8 @@ async function flagOff(): Promise<void> {
 try {
   const ping = await call(`${FUNCTIONS}/actions-inbound`, { method: 'GET' });
   check(ping.status === 405, 'functions are being served');
+  const [row] = await rest('feature_setting?key=eq.agent_triggers&select=enabled');
+  check(row?.enabled === (FLAG === 'on'), `feature_setting agent_triggers is ${FLAG}`, row);
   if (FLAG === 'on') await flagOn();
   else await flagOff();
   console.log(`\nPASS (flag ${FLAG}) — ${passed} checks`);
