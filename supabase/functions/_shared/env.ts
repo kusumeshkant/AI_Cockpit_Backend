@@ -17,8 +17,9 @@ export interface Env {
   cronSecret: string | null;
   /** Max inbound actions per agent per minute. */
   inboundRateLimitPerMinute: number;
-  /** Feature flag: Agent Triggers (app starts an agent). Off unless exactly "true". */
-  featureAgentTriggers: boolean;
+  // Feature flags (FEATURE_AGENT_TRIGGERS, FEATURE_AGENT_SERVICES) are not
+  // here: the feature_setting row decides (0010) and _shared/flags.ts reads
+  // the env variable only as the fallback for a missing row.
   /** Local development only: allow http:// and private-network trigger URLs. */
   allowInsecureTriggers: boolean;
 }
@@ -70,7 +71,6 @@ export function loadEnv(): Env {
       'INBOUND_RATE_LIMIT_PER_MINUTE',
       DEFAULT_INBOUND_RATE_LIMIT,
     ),
-    featureAgentTriggers: optionalEnv('FEATURE_AGENT_TRIGGERS') === 'true',
     allowInsecureTriggers: optionalEnv('ALLOW_INSECURE_TRIGGERS') === 'true',
   };
   return cached;

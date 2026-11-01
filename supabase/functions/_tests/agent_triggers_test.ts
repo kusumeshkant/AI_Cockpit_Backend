@@ -101,6 +101,8 @@ Deno.test('logs redact trigger secrets and URLs', () => {
 
 type Rpc = { fn: string; args: Record<string, unknown> };
 
+const flagsOn: TriggerDeps['flags'] = { isEnabled: () => Promise.resolve(true) };
+
 function stubClient(rows: Record<string, unknown>) {
   const calls: Rpc[] = [];
   const client = {
@@ -125,7 +127,8 @@ function deps(overrides: Partial<TriggerDeps> & { rows?: Record<string, unknown>
   const { client, calls } = stubClient(overrides.rows ?? {});
   let fetched = 0;
   const d: TriggerDeps = {
-    env: { featureAgentTriggers: true, allowInsecureTriggers: false },
+    env: { allowInsecureTriggers: false },
+    flags: flagsOn,
     client: () => client,
     userId: () => Promise.resolve(USER),
     fetchFn: () => {
@@ -141,8 +144,15 @@ Deno.test('agents-trigger: feature flag off → 404 feature_disabled, no DB, no 
   let clientCreated = false;
   let authed = false;
   let fetched = false;
+  const asked: string[] = [];
   const handle = createTriggerHandler({
-    env: { featureAgentTriggers: false, allowInsecureTriggers: false },
+    env: { allowInsecureTriggers: false },
+    flags: {
+      isEnabled: (key) => {
+        asked.push(key);
+        return Promise.resolve(false);
+      },
+    },
     client: () => {
       clientCreated = true;
       throw new Error('must not touch the database');
@@ -163,6 +173,7 @@ Deno.test('agents-trigger: feature flag off → 404 feature_disabled, no DB, no 
   assertFalse(clientCreated);
   assertFalse(authed);
   assertFalse(fetched);
+  assertEquals(asked, ['agent_triggers']);
 });
 
 for (const [outcome, status, code] of [
@@ -230,7 +241,7 @@ Deno.test('agents-trigger: http trigger_url is blocked unless ALLOW_INSECURE_TRI
   assertEquals(blocked.fetched(), 0);
   assertEquals(blocked.calls[1].args.p_delivered, false);
 
-  const allowed = deps({ rows, env: { featureAgentTriggers: true, allowInsecureTriggers: true } });
+  const allowed = deps({ rows, env: { allowInsecureTriggers: true } });
   const ok = await createTriggerHandler(allowed.d)(request());
   assertEquals((await ok.json()).data.delivered, true);
   assertEquals(allowed.fetched(), 1);

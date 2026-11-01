@@ -11,6 +11,7 @@ product/backend/
 ├─ deno.json                         # lint / test / e2e tasks
 ├─ scripts/
 │  ├─ e2e-agent-trigger.sh / .ts     # Agent Triggers e2e (serves functions flag on + off)
+│  ├─ set-feature.ts                 # switch a feature_setting flag on / off (service role)
 │  ├─ e2e-core-loop.sh               # runs the end-to-end check
 │  ├─ e2e-core-loop.ts               #   (Deno: fetch, HMAC, local callback receiver)
 │  ├─ e2e-test-action.sh / .ts       # agents-test-action access rules (owner-only)
@@ -25,8 +26,10 @@ product/backend/
    │  │                              #   get_owned_agent, agent_rate + hit_rate_limit
    │  ├─ 0005_agent_triggers.sql     # agent_trigger, trigger_run, trigger RPCs (feature-flagged)
    │  ├─ 0006_token_owner_and_agent_roles.sql # one device token = one user; owner-only agents
-   │  └─ 0007_account_deletion.sql   # delete_account_data RPC, erasure-only audit bypass,
-   │                                 #   account_deletion_log (no PII)
+   │  ├─ 0007_account_deletion.sql   # delete_account_data RPC, erasure-only audit bypass,
+   │  │                              #   account_deletion_log (no PII)
+   │  ├─ 0008 … 0009                 # reviewer sign-in guard; explicit Data API grants
+   │  └─ 0010_feature_settings.sql   # feature_setting flags (DB is the source of truth)
    ├─ functions/
    │  ├─ _shared/                    # library (not deployed): env, http, errors, logger,
    │  │                              #   supabase, hmac, vault, fcm, push, callback, delivery,
@@ -38,8 +41,8 @@ product/backend/
    │  ├─ agents-test-action/index.ts # JWT (owner)
    │  ├─ agents-rotate-secret/index.ts # JWT (owner)
    │  ├─ callbacks-retry/index.ts    # X-Cron-Secret (pg_cron only)
-   │  ├─ agents-configure-trigger/   # JWT (owner), FEATURE_AGENT_TRIGGERS
-   │  ├─ agents-trigger/             # JWT, FEATURE_AGENT_TRIGGERS (handler.ts + index.ts)
+   │  ├─ agents-configure-trigger/   # JWT (owner), flag agent_triggers
+   │  ├─ agents-trigger/             # JWT, flag agent_triggers (handler.ts + index.ts)
    │  ├─ account-delete/index.ts     # JWT: deletes the caller's account
    │  └─ .env.example                # copy to .env (git-ignored)
    ├─ tests/core_loop_test.sql       # pgTAP: RLS, privileges, idempotency
@@ -77,15 +80,15 @@ supabase functions serve --no-verify-jwt --env-file supabase/functions/.env
 
 ```bash
 deno task lint               # deno lint (functions + scripts)
-deno task test               # 66 unit tests: hmac, validation, errors/logger, fcm, callback,
+deno task test               # 90 unit tests: hmac, validation, errors/logger, fcm, callback,
                              #   backoff, cron guard, rate limiter, Retry-After, agent triggers,
-                             #   account deletion
-supabase test db             # 158 pgTAP assertions: RLS, privileges, idempotency, append-only
+                             #   account deletion, feature flags
+supabase test db             # 222 pgTAP assertions: RLS, privileges, idempotency, append-only
                              #   audit, retry claims + leases, rotation, rate-limit windows,
                              #   agent triggers, token ownership, owner-only agents, account
                              #   deletion
 scripts/e2e-core-loop.sh     # 79-check end-to-end run against the running stack
-scripts/e2e-agent-trigger.sh # Agent Triggers: flag on (29 checks) + flag off (7); stop any
+scripts/e2e-agent-trigger.sh # Agent Triggers: flag on (30 checks) + flag off (8); stop any
                              #   running `functions serve` first — it serves them itself
 scripts/e2e-test-action.sh   # agents-test-action: 18 checks (foreign agent, approver,
                              #   disabled agent) against the running stack
@@ -202,11 +205,26 @@ Follow **[docs/DEPLOY.md](docs/DEPLOY.md)**: project setup (ap-south-1), migrati
 
 ## Agent Triggers (feature-flagged)
 
-The reverse direction: a signed-in user starts an agent. **Off by default.** Both functions answer `404 feature_disabled` before touching the database unless `FEATURE_AGENT_TRIGGERS=true`.
+The reverse direction: a signed-in user starts an agent. **Off by default.** Both functions answer `404 feature_disabled` (before auth or any RPC) unless the `agent_triggers` feature flag is on.
+
+## Feature flags (0010)
+
+`public.feature_setting` (`key`, `enabled`, `min_app_version`, `note`, `updated_at`) is the source of truth for the Edge Functions **and** the app, so a feature switches on or off with no app re-release or redeploy. Seeded rows: `agent_triggers` (off) and `agent_services` (off).
+
+```bash
+eval "$(supabase status -o env | grep -E '^(API_URL|SERVICE_ROLE_KEY)=' | sed 's/^/export /')"   # local
+deno run --allow-net --allow-env scripts/set-feature.ts agent_triggers on    # or off; --note "why"
+```
+
+For a cloud project, set `SUPABASE_URL` and `SUPABASE_SERVICE_ROLE_KEY` in the shell instead (the script prints only key, state and host).
+
+- **Server:** `_shared/flags.ts` reads all rows once and caches them per isolate for ≤ 30 s. A missing row falls back to `FEATURE_<KEY>` (`FEATURE_AGENT_TRIGGERS`, `FEATURE_AGENT_SERVICES`; exactly `"true"`). A failed read **fails closed** (off) and isn't cached.
+- **App:** signed-in users read `key, enabled, min_app_version` (RLS; no other column, no writes; anon nothing). The app keeps its last known value and fails closed when it has none.
 
 | Env | Default | Meaning |
 |---|---|---|
-| `FEATURE_AGENT_TRIGGERS` | unset (off) | Enables `agents-configure-trigger` and `agents-trigger`. Leave unset in committed config. |
+| `FEATURE_AGENT_TRIGGERS` | unset (off) | **Fallback only** when the `agent_triggers` row is missing. Leave unset in committed config and in the cloud. |
+| `FEATURE_AGENT_SERVICES` | unset (off) | Same, for `agent_services`. |
 | `ALLOW_INSECURE_TRIGGERS` | unset (off) | **Local only.** Allows `http://` and private-network trigger URLs. |
 
 | Function | Auth | Request | Success |

@@ -1,7 +1,8 @@
 // Supabase Edge Function: agents-trigger  (JWT — called by the signed-in app)
 //
-// Starts an agent (Agent Triggers, behind FEATURE_AGENT_TRIGGERS). Flow:
-//   1. Flag off → 404 feature_disabled, before any DB access or I/O.
+// Starts an agent (Agent Triggers, behind the `agent_triggers` feature_setting
+// row; FEATURE_AGENT_TRIGGERS only when the row is missing). Flow:
+//   1. Flag off → 404 feature_disabled; only the cached flag read happens.
 //   2. Authenticate; validate { agent_id }.
 //   3. begin_trigger_run — checks the workspace, that the trigger is enabled
 //      and min_interval_secs, then records the run ('pending') and audits
@@ -11,9 +12,17 @@
 //      signed with X-Cockpit-Trigger-Signature (HMAC, trigger secret).
 //   5. record_trigger_result — sent / failed (audited 'trigger_failed').
 import { loadEnv } from '../_shared/env.ts';
+import { featureFlags } from '../_shared/flags.ts';
 import { serviceClient, userIdFromReq } from '../_shared/supabase.ts';
 import { createTriggerHandler } from './handler.ts';
 
 const env = loadEnv();
 
-Deno.serve(createTriggerHandler({ env, client: serviceClient, userId: userIdFromReq }));
+Deno.serve(
+  createTriggerHandler({
+    env,
+    flags: featureFlags(),
+    client: serviceClient,
+    userId: userIdFromReq,
+  }),
+);
