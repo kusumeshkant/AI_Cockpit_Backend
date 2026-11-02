@@ -47,6 +47,9 @@ const EXPECTED = {
 const SERVICE_DML_TABLES = [
   'workspace', 'app_user', 'agent', 'action', 'agent_rate', 'agent_trigger',
   'trigger_run', 'account_deletion_log', 'reviewer_signin_guard', 'feature_setting',
+  // 0011 agent services
+  'agent_service', 'service_access', 'gateway_rate', 'gateway_nonce', 'gateway_call',
+  'service_deletion_job',
 ];
 const AUTHENTICATED_COLUMNS: Record<string, string[]> = {
   app_user: ['id', 'email', 'workspace_id', 'role'],
@@ -62,6 +65,14 @@ const AUTHENTICATED_COLUMNS: Record<string, string[]> = {
     'min_interval_secs', 'created_at', 'updated_at',
   ],
   feature_setting: ['key', 'enabled', 'min_app_version'], // 0010
+  agent_service: [ // 0011: never base_url, manifest or signing key ids
+    'slug', 'display_name', 'description', 'icon', 'status', 'contract_version',
+    'min_app_version', 'ui', 'ui_schema_version',
+  ],
+  service_access: [ // 0011: never subject or consented_by
+    'workspace_id', 'service_slug', 'agent_id', 'state', 'consent_version',
+    'consented_at', 'first_used_at', 'created_at', 'updated_at',
+  ],
 };
 // 0010: feature flags that must have a row (names only; on/off is not checked).
 const EXPECTED_FEATURE_KEYS = ['agent_services', 'agent_triggers'];
@@ -101,6 +112,13 @@ const EXPECTED_PRIVILEGES = {
       'record_trigger_result(uuid, boolean, text)',
       'delete_account_data(uuid)',
       'reviewer_signin_attempt(text)',
+      // 0011 agent services
+      'resolve_service_access(uuid, text)',
+      'enable_service(uuid, text, text)',
+      'disable_service(uuid, text)',
+      'hit_gateway_rate(uuid, text, text, integer, interval)',
+      'record_gateway_call(uuid, text, text, integer, integer)',
+      'register_agent_service(text, text, text, text, text, text, text, jsonb, text, text, text)',
     ].map((fn) => `service_role|${fn}`),
   ],
 };
