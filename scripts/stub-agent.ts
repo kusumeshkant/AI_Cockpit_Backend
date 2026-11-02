@@ -15,9 +15,19 @@
 // trial_ended, agent_paused, unsupported_contract; failNext(n, status) for
 // transient errors; setQuota(remaining); stop()/start() for "down".
 //
+// It also POSTS cards to Cockpit (agent-service-inbound) with the INBOUND
+// keys: socialPostDraft() + postCard() (used by scripts/e2e-service-cards.ts).
+//
 // Standalone: STUB_PORT=8792 STUB_KEYS='{"<key id>":"<secret>",...}'
 //   deno run --allow-net --allow-env scripts/stub-agent.ts
-import { sha256Hex, V1_HEADERS, verifyV1 } from '../supabase/functions/_shared/hmac.ts';
+// deno-lint-ignore-file no-explicit-any -- card answers are untyped JSON.
+import {
+  sha256Hex,
+  signedHeadersV1,
+  V1_HEADERS,
+  V1_INBOUND_CARD_PATH,
+  verifyV1,
+} from '../supabase/functions/_shared/hmac.ts';
 
 /** Fault modes. */
 export type StubMode =
@@ -291,4 +301,78 @@ if (import.meta.main) {
   const mode = Deno.env.get('STUB_MODE') as StubMode | undefined;
   if (mode) stub.setMode(mode);
   console.log(`stub agent listening on :${port} (${Object.keys(keys).length} key ids)`);
+}
+
+// -----------------------------------------------------------------------------
+// Agent → Cockpit cards (0013): the stub as a CLIENT of agent-service-inbound,
+// signing with the service's INBOUND key over the canonical path.
+// -----------------------------------------------------------------------------
+
+/** A `social_post_draft` card as the agent would send it (summary only). */
+export function socialPostDraft(
+  service: string,
+  ideaId: string,
+  options: { topic: string; hook: string; revision?: number; format?: string; expiresAt?: string },
+): Record<string, unknown> {
+  return {
+    type: 'social_post_draft',
+    title: `Post idea: ${options.topic}`.slice(0, 80),
+    summary: options.hook,
+    payload: {
+      schema: 1,
+      service,
+      idea_id: ideaId,
+      format: options.format ?? 'carousel',
+      topic: options.topic,
+      hook: options.hook,
+      findings: { blocking: 0, to_fix: 1, warnings: 2 },
+      revision: options.revision ?? 1,
+    },
+    ...(options.expiresAt ? { expires_at: options.expiresAt } : {}),
+  };
+}
+
+/** One signed card request. Faults are for tests only. */
+export interface CardPost {
+  /** The agent-service-inbound URL. */
+  url: string;
+  keyId: string;
+  secret: string;
+  /** The service_access subject (raw workspace id). */
+  workspace: string;
+  /** Acting user id, or `system` for agent-initiated work. */
+  user?: string;
+  /** The JSON body (object) or an exact raw string. */
+  body: Record<string, unknown> | string;
+  nonce?: string;
+  timestamp?: number;
+  contractVersion?: string;
+  fault?: 'bad_signature' | 'sign_actual_path';
+}
+
+/** Signs and posts a card request; returns status + parsed body. */
+export async function postCard(post: CardPost): Promise<{ status: number; body: any; nonce: string }> {
+  const raw = typeof post.body === 'string' ? post.body : JSON.stringify(post.body);
+  const nonce = post.nonce ?? crypto.randomUUID();
+  const fields = {
+    keyId: post.keyId,
+    timestamp: post.timestamp ?? Math.floor(Date.now() / 1000),
+    nonce,
+    method: 'POST',
+    path: post.fault === 'sign_actual_path' ? new URL(post.url).pathname : V1_INBOUND_CARD_PATH,
+    workspace: post.workspace,
+    user: post.user ?? 'system',
+    requestId: crypto.randomUUID(),
+  };
+  const headers = await signedHeadersV1(fields, raw, post.secret, post.contractVersion ?? '1.0');
+  if (post.fault === 'bad_signature') headers[V1_HEADERS.signature] = `v1=${'0'.repeat(64)}`;
+  const response = await fetch(post.url, { method: 'POST', headers, body: raw });
+  const text = await response.text();
+  let body: any = text;
+  try {
+    body = JSON.parse(text);
+  } catch {
+    // keep text
+  }
+  return { status: response.status, body, nonce };
 }

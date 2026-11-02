@@ -124,6 +124,14 @@ const EXPECTED_PRIVILEGES = {
       'get_service_signing_key(text)',
       'swap_service_signing_keys(text)',
       'record_gateway_outcome(uuid, text, text, integer, integer, integer, boolean, boolean)',
+      // 0013 service cards
+      'register_agent_service(text, text, text, text, text, text, text, jsonb, text, text, text, text, text)',
+      'get_service_inbound_keys(text)',
+      'swap_service_inbound_keys(text)',
+      'claim_gateway_nonce(uuid, text)',
+      'resolve_service_inbound(text, text)',
+      'record_action_update(uuid, text, integer, text, text, jsonb, timestamp with time zone)',
+      'record_action_withdraw(uuid, text, text)',
     ].map((fn) => `service_role|${fn}`),
   ],
 };
@@ -489,6 +497,18 @@ async function databaseChecks(url: string, ref: string | undefined): Promise<voi
       for (const key of EXPECTED_FEATURE_KEYS) {
         check(featureKeys.includes(key), `feature_setting row ${key}`, 'missing: env fallback applies');
       }
+
+      section('Agent services (0013; names only)');
+      const keyless = await tx`
+        select slug from public.agent_service
+         where status in ('active', 'paused')
+           and (signing_key_current_id is null or signing_key_next_id is null
+                or inbound_key_current_id is null or inbound_key_next_id is null)`;
+      check(
+        keyless.length === 0,
+        'every listed service has outbound and inbound signing keys',
+        `missing on: ${keyless.map((r: any) => r.slug).join(', ')} (register-service --rotate-keys before listing)`,
+      );
 
       section('No local seed data');
       const [seed] = await tx`

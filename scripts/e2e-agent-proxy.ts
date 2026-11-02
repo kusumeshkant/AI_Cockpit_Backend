@@ -120,7 +120,7 @@ async function registerStub(args: string[]): Promise<Record<string, string>> {
   const text = new TextDecoder().decode(out.stdout);
   if (!out.success) throw new Error(`register-service failed: ${new TextDecoder().decode(out.stderr).split('\n')[0]}`);
   const keys: Record<string, string> = {};
-  for (const match of text.matchAll(/^\s+(?:current|next):\s+([0-9a-f-]{36})\s+(svcsig_\S+)$/gm)) keys[match[1]] = match[2];
+  for (const match of text.matchAll(/^\s+outbound (?:current|next):\s+([0-9a-f-]{36})\s+(svcsig_\S+)$/gm)) keys[match[1]] = match[2];
   return keys;
 }
 

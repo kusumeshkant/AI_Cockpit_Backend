@@ -19,7 +19,7 @@
       "decision.apply": { "class": "write", "roles": ["owner", "approver"], "max_request_bytes": 2048, "max_response_bytes": 8192 },
       "subject.delete": { "class": "destructive", "roles": ["owner"], "max_request_bytes": 1024, "max_response_bytes": 4096 }
     },
-    "card_types": ["idea"],
+    "card_types": ["social_post_draft"],
     "data_categories": ["brand_profile", "content"],
     "deletion_op": "subject.delete",
     "errors": ["validation", "not_found", "conflict", "trial_ended", "quota_reached", "approval_blocked", "agent_paused", "idea_final"]

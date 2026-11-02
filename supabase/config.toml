@@ -441,6 +441,10 @@ verify_jwt = false
 [functions.agent-proxy]
 verify_jwt = true
 
+# Agent → Cockpit cards (0013): auth is the inbound signature, not a JWT.
+[functions.agent-service-inbound]
+verify_jwt = false
+
 [functions.agents-configure-trigger]
 verify_jwt = true
 

@@ -11,6 +11,42 @@ export interface NewActionPush {
   title: string;
   summary: string | null;
   tokens: readonly string[];
+  /** Card type; types in SERVICE_CARD_PUSH get fixed text (0013). */
+  type?: string;
+}
+
+/** A fixed notification: never the card's own title or summary. */
+export interface PushTemplate {
+  title: string;
+  body: string;
+}
+
+/**
+ * Service card types (agent-service-inbound) and their fixed text. Their card
+ * text never leaves Cockpit in a push. Other types keep title / summary.
+ */
+export const SERVICE_CARD_PUSH: Readonly<Record<string, PushTemplate>> = {
+  social_post_draft: { title: 'AI Cockpit', body: 'A post idea is ready for review' },
+};
+
+/** The notification for [push]: a fixed template for service cards. */
+export function pushMessage(push: NewActionPush): {
+  title: string;
+  body: string;
+  data: Record<string, string>;
+} {
+  const template = push.type !== undefined && Object.hasOwn(SERVICE_CARD_PUSH, push.type)
+    ? SERVICE_CARD_PUSH[push.type]
+    : undefined;
+  if (template) {
+    // `type: action` keeps the existing deep link working in current app builds.
+    return {
+      title: template.title,
+      body: template.body,
+      data: { type: 'action', action_id: push.actionId, kind: 'service_card' },
+    };
+  }
+  return { title: push.title, body: push.summary ?? '', data: { type: 'action', action_id: push.actionId } };
 }
 
 /**
@@ -23,15 +59,7 @@ export async function notifyNewAction(
   push: NewActionPush,
 ): Promise<void> {
   try {
-    const result = await sendPush(
-      push.tokens,
-      {
-        title: push.title,
-        body: push.summary ?? '',
-        data: { type: 'action', action_id: push.actionId },
-      },
-      { serviceAccountJson },
-    );
+    const result = await sendPush(push.tokens, pushMessage(push), { serviceAccountJson });
     if (result.invalidTokens.length > 0) {
       await client.rpc('prune_fcm_tokens', { p_tokens: result.invalidTokens });
     }
