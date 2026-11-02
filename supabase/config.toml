@@ -437,6 +437,10 @@ verify_jwt = true
 verify_jwt = false
 
 # Agent Triggers (behind the agent_triggers feature_setting row). Called by the signed-in app.
+# Agent services gateway (0012, behind the agent_services feature_setting row). Called by the signed-in app.
+[functions.agent-proxy]
+verify_jwt = true
+
 [functions.agents-configure-trigger]
 verify_jwt = true
 

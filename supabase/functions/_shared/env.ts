@@ -22,6 +22,10 @@ export interface Env {
   // the env variable only as the fallback for a missing row.
   /** Local development only: allow http:// and private-network trigger URLs. */
   allowInsecureTriggers: boolean;
+  /** Local development only: allow http:// and private-network agent service URLs. */
+  allowInsecureServices: boolean;
+  /** agent-proxy limits per user, service and op class, per minute. */
+  gatewayRates: { read: number; write: number; destructive: number };
 }
 
 /** Default for INBOUND_RATE_LIMIT_PER_MINUTE. */
@@ -72,6 +76,12 @@ export function loadEnv(): Env {
       DEFAULT_INBOUND_RATE_LIMIT,
     ),
     allowInsecureTriggers: optionalEnv('ALLOW_INSECURE_TRIGGERS') === 'true',
+    allowInsecureServices: optionalEnv('ALLOW_INSECURE_SERVICES') === 'true',
+    gatewayRates: {
+      read: positiveIntEnv('GATEWAY_RATE_READ_PER_MINUTE', 120),
+      write: positiveIntEnv('GATEWAY_RATE_WRITE_PER_MINUTE', 30),
+      destructive: positiveIntEnv('GATEWAY_RATE_DESTRUCTIVE_PER_MINUTE', 5),
+    },
   };
   return cached;
 }

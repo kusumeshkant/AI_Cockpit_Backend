@@ -28,6 +28,19 @@ export const REDACTED_KEYS: ReadonlySet<string> = new Set([
   'trigger',
   'trigger_secret',
   'trigger_url',
+  // Agent services gateway (agent-proxy): op inputs / outputs and content fields.
+  'params',
+  'result',
+  'caption',
+  'hook',
+  'outline',
+  'hashtags',
+  'brand',
+  'facts',
+  'niche',
+  'audience',
+  'tone',
+  'samples',
 ]);
 
 const MAX_DEPTH = 6;

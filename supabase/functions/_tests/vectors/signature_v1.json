@@ -1,0 +1,65 @@
+{
+  "scheme": "Cockpit-Signature v1",
+  "algorithm": "HMAC-SHA256",
+  "secret": "svcsig_test_vector_secret_do_not_use_0123456789",
+  "note": "Test-only secret. body is the exact raw JSON string; hashes and signatures are lowercase hex.",
+  "vectors": [
+    {
+      "name": "read op, small body",
+      "input": {
+        "key_id": "11111111-2222-4333-8444-555555555555",
+        "timestamp": 1767225600,
+        "nonce": "6f1c1e9e-3b7a-4c55-9d1e-2f3a4b5c6d7e",
+        "method": "POST",
+        "path": "/cockpit/v1/ops/ideas.list",
+        "workspace": "aaaaaaaa-1111-4aaa-8aaa-aaaaaaaaaaaa",
+        "user": "bbbbbbbb-2222-4bbb-8bbb-bbbbbbbbbbbb",
+        "request_id": "0d9a7c1e-5b2f-4e8a-9c3d-1a2b3c4d5e6f",
+        "body": "{\"params\":{\"limit\":5}}"
+      },
+      "expected": {
+        "body_sha256": "6c7952f3e4e80ff72f051d8d9a2fa70721ab1950c918fa7a2394550e77dcea64",
+        "string_to_sign": "COCKPIT-V1\n11111111-2222-4333-8444-555555555555\n1767225600\n6f1c1e9e-3b7a-4c55-9d1e-2f3a4b5c6d7e\nPOST\n/cockpit/v1/ops/ideas.list\n6c7952f3e4e80ff72f051d8d9a2fa70721ab1950c918fa7a2394550e77dcea64\naaaaaaaa-1111-4aaa-8aaa-aaaaaaaaaaaa\nbbbbbbbb-2222-4bbb-8bbb-bbbbbbbbbbbb\n0d9a7c1e-5b2f-4e8a-9c3d-1a2b3c4d5e6f",
+        "signature": "v1=d22a46da35454074e1d0cd078e32b1388cd0197559baa1f6e29e7cfd0f3e128d"
+      }
+    },
+    {
+      "name": "write op with if_match and non-ASCII text",
+      "input": {
+        "key_id": "11111111-2222-4333-8444-555555555555",
+        "timestamp": 1767225661,
+        "nonce": "c2b7f3a0-8d4e-4f1a-b6c9-0e1d2c3b4a59",
+        "method": "POST",
+        "path": "/cockpit/v1/ops/brand.save",
+        "workspace": "aaaaaaaa-1111-4aaa-8aaa-aaaaaaaaaaaa",
+        "user": "bbbbbbbb-2222-4bbb-8bbb-bbbbbbbbbbbb",
+        "request_id": "app:brand-save:42",
+        "body": "{\"params\":{\"brand\":{\"name\":\"Café Ādi ✓\"}},\"if_match\":\"v3\"}"
+      },
+      "expected": {
+        "body_sha256": "7dcb2f748557cdae884bcce70fcf877634cb05424988713a7b07b5919f8c92fa",
+        "string_to_sign": "COCKPIT-V1\n11111111-2222-4333-8444-555555555555\n1767225661\nc2b7f3a0-8d4e-4f1a-b6c9-0e1d2c3b4a59\nPOST\n/cockpit/v1/ops/brand.save\n7dcb2f748557cdae884bcce70fcf877634cb05424988713a7b07b5919f8c92fa\naaaaaaaa-1111-4aaa-8aaa-aaaaaaaaaaaa\nbbbbbbbb-2222-4bbb-8bbb-bbbbbbbbbbbb\napp:brand-save:42",
+        "signature": "v1=7cb786a0bf9e220f5a64f55d48fbfae7d5cff9511a0eee008adc75491c9989e1"
+      }
+    },
+    {
+      "name": "empty params, path prefix on base_url",
+      "input": {
+        "key_id": "99999999-8888-4777-8666-555555555555",
+        "timestamp": 1767225700,
+        "nonce": "0b1c2d3e-4f50-4617-8829-3a4b5c6d7e8f",
+        "method": "POST",
+        "path": "/agent/cockpit/v1/ops/usage.get",
+        "workspace": "cccccccc-3333-4ccc-8ccc-cccccccccccc",
+        "user": "dddddddd-4444-4ddd-8ddd-dddddddddddd",
+        "request_id": "e3b0c442-98fc-4c14-9afb-f4c8996fb924",
+        "body": "{\"params\":{}}"
+      },
+      "expected": {
+        "body_sha256": "240fab8a4ce405e1198aebb220ab987363ba8a287fcc5e8e7b08a5f14e864ac1",
+        "string_to_sign": "COCKPIT-V1\n99999999-8888-4777-8666-555555555555\n1767225700\n0b1c2d3e-4f50-4617-8829-3a4b5c6d7e8f\nPOST\n/agent/cockpit/v1/ops/usage.get\n240fab8a4ce405e1198aebb220ab987363ba8a287fcc5e8e7b08a5f14e864ac1\ncccccccc-3333-4ccc-8ccc-cccccccccccc\ndddddddd-4444-4ddd-8ddd-dddddddddddd\ne3b0c442-98fc-4c14-9afb-f4c8996fb924",
+        "signature": "v1=257922bb354e139af621c036a3049801595d70a1018a161e422c9236b6139ddd"
+      }
+    }
+  ]
+}

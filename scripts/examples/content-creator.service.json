@@ -34,6 +34,7 @@
     },
     "card_types": ["post_draft"],
     "data_categories": ["content", "brand_profile"],
-    "deletion_op": "subject.delete"
+    "deletion_op": "subject.delete",
+    "errors": ["validation", "not_found", "conflict", "quota_reached", "trial_ended"]
   }
 }

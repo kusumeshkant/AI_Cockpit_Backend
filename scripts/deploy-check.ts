@@ -30,12 +30,13 @@ const EXPECTED = {
     'ALLOW_INSECURE_TRIGGERS',
     'FEATURE_AGENT_TRIGGERS',
     'FEATURE_AGENT_SERVICES',
+    'ALLOW_INSECURE_SERVICES', // 0012: local stub agent only
   ],
   // Play review sign-in (reviewer-signin); reported, never required.
   reviewerSecrets: ['REVIEWER_LOGIN_ENABLED', 'REVIEWER_EMAIL', 'REVIEWER_CODE'],
   vaultSecrets: ['cockpit_callbacks_retry_url', 'cockpit_cron_secret'],
   extensions: ['pg_cron', 'pg_net', 'supabase_vault'],
-  cronJob: 'cockpit-callbacks-retry',
+  cronJobs: ['cockpit-callbacks-retry', 'cockpit-gateway-prune'], // 0004, 0012
   // seed.sql (LOCAL ONLY) leftovers that must never exist in the cloud.
   seedUserId: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
   seedAgentId: 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb',
@@ -119,6 +120,10 @@ const EXPECTED_PRIVILEGES = {
       'hit_gateway_rate(uuid, text, text, integer, interval)',
       'record_gateway_call(uuid, text, text, integer, integer)',
       'register_agent_service(text, text, text, text, text, text, text, jsonb, text, text, text)',
+      // 0012 gateway proxy
+      'get_service_signing_key(text)',
+      'swap_service_signing_keys(text)',
+      'record_gateway_outcome(uuid, text, text, integer, integer, integer, boolean, boolean)',
     ].map((fn) => `service_role|${fn}`),
   ],
 };
@@ -333,12 +338,10 @@ async function databaseChecks(url: string, ref: string | undefined): Promise<voi
       for (const name of EXPECTED.extensions) {
         check(extensions.has(name), `extension ${name}`, 'not installed');
       }
-      const [job] = await tx`select active from cron.job where jobname = ${EXPECTED.cronJob}`;
-      check(
-        job?.active === true,
-        `pg_cron job ${EXPECTED.cronJob} active`,
-        job ? 'inactive' : 'missing',
-      );
+      for (const name of EXPECTED.cronJobs) {
+        const [job] = await tx`select active from cron.job where jobname = ${name}`;
+        check(job?.active === true, `pg_cron job ${name} active`, job ? 'inactive' : 'missing');
+      }
 
       section('Vault (names only)');
       const vault = new Set((await tx`select name from vault.secrets`).map((r: any) => r.name));

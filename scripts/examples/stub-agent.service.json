@@ -1,0 +1,27 @@
+{
+  "slug": "stub-agent",
+  "display_name": "Stub agent (local e2e)",
+  "description": "LOCAL ONLY: scripts/stub-agent.ts, used by scripts/e2e-agent-proxy.sh.",
+  "icon": "flask",
+  "base_url": "http://host.docker.internal:8792",
+  "contract_version": "1.0",
+  "min_app_version": null,
+  "manifest": {
+    "ui": "native",
+    "ui_schema_version": 1,
+    "ops": {
+      "brand.get": { "class": "read", "roles": ["owner", "approver"], "max_request_bytes": 1024, "max_response_bytes": 65536 },
+      "brand.save": { "class": "write", "roles": ["owner"], "max_request_bytes": 2048, "max_response_bytes": 4096 },
+      "idea.generate": { "class": "write", "roles": ["owner"], "timeout_ms": 5000, "max_request_bytes": 4096, "max_response_bytes": 4096 },
+      "job.poll": { "class": "read", "roles": ["owner", "approver"], "max_request_bytes": 1024, "max_response_bytes": 65536 },
+      "ideas.list": { "class": "read", "roles": ["owner", "approver"], "max_request_bytes": 1024, "max_response_bytes": 65536 },
+      "usage.get": { "class": "read", "roles": ["owner", "approver"], "timeout_ms": 1500, "max_request_bytes": 1024, "max_response_bytes": 4096 },
+      "decision.apply": { "class": "write", "roles": ["owner", "approver"], "max_request_bytes": 2048, "max_response_bytes": 8192 },
+      "subject.delete": { "class": "destructive", "roles": ["owner"], "max_request_bytes": 1024, "max_response_bytes": 4096 }
+    },
+    "card_types": ["idea"],
+    "data_categories": ["brand_profile", "content"],
+    "deletion_op": "subject.delete",
+    "errors": ["validation", "not_found", "conflict", "trial_ended", "quota_reached", "approval_blocked", "agent_paused", "idea_final"]
+  }
+}
