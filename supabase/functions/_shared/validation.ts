@@ -288,3 +288,19 @@ export function cardExpiry(requested: string | undefined, nowMs: number): string
   if (!(at > nowMs)) throw new AppError('validation', 'expires_at must be in the future');
   return new Date(Math.min(at, max)).toISOString();
 }
+
+/**
+ * `actions-decision` body for a SERVICE card (0014): approve or reject only
+ * (no edits). `acknowledged` lists findings the reviewer accepted (approve).
+ */
+export const ServiceDecisionSchema = z
+  .object({
+    action_id: z.string().uuid(),
+    decision: z.enum(['approved', 'rejected']),
+    reason: z.string().max(500).nullish(),
+    acknowledged: z.array(z.string().min(1).max(64).regex(/^[A-Za-z0-9._:-]+$/)).max(20).optional(),
+  })
+  .strict();
+
+/** Parsed service decision. */
+export type ServiceDecision = z.infer<typeof ServiceDecisionSchema>;

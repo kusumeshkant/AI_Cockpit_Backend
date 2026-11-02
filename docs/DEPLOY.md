@@ -91,6 +91,8 @@ Then in Dashboard → SQL editor (replace the placeholders; don't save the query
 ```sql
 select vault.create_secret('https://<PROJECT_REF>.supabase.co/functions/v1/callbacks-retry', 'cockpit_callbacks_retry_url');
 select vault.create_secret('<CRON_SECRET>', 'cockpit_cron_secret');
+-- 0014: the service deletion fan-out (cron job cockpit-service-deletions-retry, every 5 min)
+select vault.create_secret('https://<PROJECT_REF>.supabase.co/functions/v1/service-deletions-retry', 'cockpit_service_deletions_retry_url');
 ```
 
 To rotate later: `select vault.update_secret((select id from vault.secrets where name = 'cockpit_cron_secret'), '<NEW_CRON_SECRET>');` and set the same value as `CRON_SECRET` (step 6) right after.
@@ -117,6 +119,7 @@ supabase secrets list   # shows names and digests only
 | `FEATURE_AGENT_TRIGGERS` | **not set** | — | Agent Triggers stay off in the cloud |
 | `ALLOW_INSECURE_CALLBACKS`, `ALLOW_INSECURE_TRIGGERS` | **never set** | — | local-only; allow `http://` and private hosts |
 | Vault `cockpit_callbacks_retry_url` | SQL editor (step 5) | project functions URL | |
+| Vault `cockpit_service_deletions_retry_url` | SQL editor (step 5) | project functions URL (0014) | |
 | Vault `cockpit_cron_secret` | SQL editor (step 5) | `<CRON_SECRET>` | never the `seed.sql` value |
 | Agent inbound / trigger secrets | Vault, created by the app | — | nothing to do |
 | SMTP password | Dashboard → Auth → SMTP | Resend API key | |

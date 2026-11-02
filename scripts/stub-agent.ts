@@ -13,7 +13,8 @@
 // Failure injection (programmatic, used by scripts/e2e-agent-proxy.ts; or
 // STUB_MODE for a standalone run): slow, error500, malformed, oversize,
 // trial_ended, agent_paused, unsupported_contract; failNext(n, status) for
-// transient errors; setQuota(remaining); stop()/start() for "down".
+// transient errors; setQuota(remaining); stop()/start() for "down";
+// approval_blocked (decision.apply only); seedIdea / hasWorkspace / ideaStatus.
 //
 // It also POSTS cards to Cockpit (agent-service-inbound) with the INBOUND
 // keys: socialPostDraft() + postCard() (used by scripts/e2e-service-cards.ts).
@@ -38,7 +39,8 @@ export type StubMode =
   | 'oversize'
   | 'trial_ended'
   | 'agent_paused'
-  | 'unsupported_contract';
+  | 'unsupported_contract'
+  | 'approval_blocked';
 
 /** One request as the stub saw it (ids only + verdict). */
 export interface SeenRequest {
@@ -89,6 +91,12 @@ export interface StubHandle {
   setMode(mode: StubMode): void;
   failNext(count: number, status?: number): void;
   setQuota(remaining: number, limit?: number): void;
+  /** Adds a pending idea for [workspace] (cards posted via postCard refer to it). */
+  seedIdea(workspace: string, ideaId: string): void;
+  /** Whether the stub still holds any data for [workspace]. */
+  hasWorkspace(workspace: string): boolean;
+  /** Status of an idea (pending / approved / rejected), or null. */
+  ideaStatus(workspace: string, ideaId: string): string | null;
   clearLog(): void;
   start(): void;
   stop(): Promise<void>;
@@ -143,6 +151,11 @@ export function startStub(options: { port: number; keys: Record<string, string>;
     clearLog: () => {
       handle.seen.length = 0;
     },
+    seedIdea: (workspace, ideaId) => {
+      ws(workspace).ideas.push({ id: ideaId, text: 'seeded idea', status: 'pending' });
+    },
+    hasWorkspace: (workspace) => workspaces.has(workspace),
+    ideaStatus: (workspace, ideaId) => workspaces.get(workspace)?.ideas.find((i) => i.id === ideaId)?.status ?? null,
     start: () => {
       server = Deno.serve(
         { port: options.port, hostname: options.hostname ?? '0.0.0.0', onListen: () => {} },
@@ -276,6 +289,9 @@ export function startStub(options: { port: number; keys: Record<string, string>;
         return done(err(403, 'trial_ended'), 'trial_ended');
       case 'agent_paused':
         return done(err(503, 'agent_paused'), 'agent_paused');
+      case 'approval_blocked':
+        if (op === 'decision.apply') return done(err(422, 'approval_blocked'), 'approval_blocked');
+        break;
     }
 
     let params: Record<string, unknown> = {};

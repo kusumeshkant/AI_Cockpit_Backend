@@ -10,7 +10,12 @@
 //      payload with the decision's original Idempotency-Key.
 //   4. record_callback_result — delivered, retrying at the next backoff step,
 //      or terminal failed after MAX_CALLBACK_ATTEMPTS.
-import { attemptDelivery } from '../_shared/delivery.ts';
+import {
+  attemptDelivery,
+  attemptServiceDelivery,
+  type ServiceDecisionPayload,
+} from '../_shared/delivery.ts';
+import { isFeatureEnabled } from '../_shared/flags.ts';
 import { isAuthorizedCron } from '../_shared/cron.ts';
 import { loadEnv } from '../_shared/env.ts';
 import { AppError, fromPostgrest } from '../_shared/errors.ts';
@@ -30,7 +35,8 @@ const LEASE_SECONDS = 120;
 interface DueCallback {
   action_id: string;
   agent_id: string;
-  callback_url: string;
+  /** null only for service agents (0014 branch). */
+  callback_url: string | null;
   callback_payload: CallbackPayload | null;
   idempotency_key: string | null;
   attempts: number;
@@ -66,6 +72,29 @@ Deno.serve(
           p_retry_in_seconds: null,
         });
         run.failed++;
+        continue;
+      }
+      // 0014: only service agents have no callback URL (agent_endpoint_required);
+      // their decision goes to the service's decision.apply op instead.
+      if (row.callback_url === null) {
+        if (!(await isFeatureEnabled('agent_services'))) {
+          // Left leased: retried after the lease, no attempt used up.
+          run.skipped = (run.skipped ?? 0) + 1;
+          continue;
+        }
+        const service = await attemptServiceDelivery(
+          client,
+          {
+            agentId: row.agent_id,
+            payload: row.callback_payload as unknown as ServiceDecisionPayload,
+            idempotencyKey: row.idempotency_key,
+            attemptsMade: row.attempts,
+          },
+          { allowInsecureServices: env.allowInsecureServices },
+        );
+        if (service.status === 'delivered') run.delivered++;
+        else if (service.status === 'retrying') run.rescheduled++;
+        else run.failed++;
         continue;
       }
       const result = await attemptDelivery(

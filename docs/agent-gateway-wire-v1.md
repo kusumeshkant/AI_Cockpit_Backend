@@ -1,6 +1,7 @@
-# Agent gateway wire contract v1 (as Cockpit implements it) — v1 rev 2
+# Agent gateway wire contract v1 (as Cockpit implements it) — v1 rev 3
 
-> **rev 2 (0013):** adds §6, agent → Cockpit cards, with a separate inbound key pair. §1–§5 are unchanged.
+> **rev 2 (0013):** adds §6, agent → Cockpit cards, with a separate inbound key pair.
+> **rev 3 (0014):** adds §7, the decisions and deletions Cockpit sends. §1–§6 are unchanged.
 
 Cockpit's `agent-proxy` is the only caller of an agent service (§1–§5). Agents send review cards back through `agent-service-inbound` (§6). This is the HTTP contract between them. Code: `supabase/functions/_shared/hmac.ts` (signing), `_shared/gateway.ts` (calls, retries, mapping), `scripts/stub-agent.ts` (a reference agent). Test vectors: `supabase/functions/_tests/vectors/signature_v1.json`.
 
@@ -221,3 +222,31 @@ For `update`, `revision` must equal `card.payload.revision`. Updates replace tit
 - `403 service_not_enabled` when access is disabled or blocked (on create and update; withdraw is always allowed).
 - `404 service_not_found` when the service is retired; `404 not_found` for an unknown card on update / withdraw.
 - `429 rate_limited` + `Retry-After`: `INBOUND_RATE_LIMIT_PER_MINUTE` (default 60) per workspace and service.
+
+## 7. Decisions and deletions (Cockpit → agent)
+
+Both are ordinary §1 calls: same headers and signature, made with the **outbound** key.
+
+### `decision.apply` (must be in the manifest)
+
+This is how a person's decision on one of your cards reaches you.
+
+```json
+{ "params": { "idea_id": "idea_42", "action_id": "<cockpit card id>", "decision": "approved",
+              "decided_by": "<user id>", "decided_at": "2026-11-02T10:00:00Z",
+              "acknowledged": ["to_fix.1"] } }
+```
+
+`decision` is `approved` or `rejected`. A rejection may carry `reason` (≤ 500 characters, the reviewer's text). `acknowledged` (approve only) lists the findings the reviewer accepted. `X-Cockpit-User` is the deciding user. `X-Cockpit-Request-Id` is the app's Idempotency-Key, and it stays the same on every retry, so **dedupe on it** (§2).
+
+- **Approve is synchronous.** Cockpit closes the card only after you answer 2xx. If you refuse (e.g. `approval_blocked`, declared in `errors`), fail, or time out, the card stays pending and the person sees your declared code, or `agent_unavailable` / `agent_timeout`. The app may retry with the same request id; return the original answer.
+- **Reject is recorded in Cockpit first**, then delivered. On failure Cockpit retries with backoff, up to 8 attempts over about an hour, with the same request id and a fresh nonce each time. Answer 2xx when applied. If the idea is already final on your side, answer `conflict`, `idea_final` or `not_found`; Cockpit treats those as delivered and stops. Anything else is retried until the attempts run out.
+
+### Deletion (the manifest's `deletion_op`, e.g. `subject.delete`)
+
+When a workspace owner deletes their account, Cockpit asks every service the workspace consented to or used to forget it:
+
+- `X-Cockpit-Workspace` is the subject to erase, `X-Cockpit-User` is `system`, and `X-Cockpit-Request-Id` is a stable job id.
+- The body is `{ "params": {} }`.
+- Delete everything you hold for that subject and answer 2xx. Answer `not_found` if you hold nothing; that also counts as done.
+- Failures are retried with backoff (destructive class: one call per attempt).

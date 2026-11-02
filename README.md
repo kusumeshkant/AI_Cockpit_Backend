@@ -16,6 +16,7 @@ product/backend/
 │  ├─ stub-agent.ts                  # LOCAL ONLY reference agent (wire v1, fault injection)
 │  ├─ e2e-agent-proxy.sh / .ts       # agent-proxy e2e against the stub (flag off + on)
 │  ├─ e2e-service-cards.sh / .ts     # agent → Cockpit cards e2e (flag off + on)
+│  ├─ e2e-service-decisions.sh / .ts # service decisions + deletion fan-out e2e (flag on + off)
 │  ├─ e2e-core-loop.sh               # runs the end-to-end check
 │  ├─ e2e-core-loop.ts               #   (Deno: fetch, HMAC, local callback receiver)
 │  ├─ e2e-test-action.sh / .ts       # agents-test-action access rules (owner-only)
@@ -36,7 +37,8 @@ product/backend/
    │  ├─ 0010_feature_settings.sql   # feature_setting flags (DB is the source of truth)
    │  ├─ 0011_agent_services.sql     # agent services gateway: registry, access, rate, calls
    │  ├─ 0012_gateway_proxy.sql      # signing key read/swap, call outcome + breaker, pruning cron
-   │  └─ 0013_service_cards.sql      # inbound key pair, card update/withdraw, hook-only audit
+   │  ├─ 0013_service_cards.sql      # inbound key pair, card update/withdraw, hook-only audit
+   │  └─ 0014_service_decisions.sql  # service decisions, deletion jobs + their cron
    ├─ functions/
    │  ├─ _shared/                    # library (not deployed): env, http, errors, logger,
    │  │                              #   supabase, hmac, vault, fcm, push, callback, delivery,
@@ -52,6 +54,7 @@ product/backend/
    │  ├─ agents-trigger/             # JWT, flag agent_triggers (handler.ts + index.ts)
    │  ├─ agent-proxy/                # JWT, flag agent_services (handler.ts + index.ts)
    │  ├─ agent-service-inbound/      # inbound signature (no JWT), flag agent_services
+   │  ├─ service-deletions-retry/    # X-Cron-Secret (pg_cron only), flag agent_services
    │  ├─ account-delete/index.ts     # JWT: deletes the caller's account
    │  └─ .env.example                # copy to .env (git-ignored)
    ├─ tests/core_loop_test.sql       # pgTAP: RLS, privileges, idempotency
@@ -89,16 +92,17 @@ supabase functions serve --no-verify-jwt --env-file supabase/functions/.env
 
 ```bash
 deno task lint               # deno lint (functions + scripts)
-deno task test               # 133 unit tests: hmac, validation, errors/logger, fcm, callback,
+deno task test               # 144 unit tests: hmac, validation, errors/logger, fcm, callback,
                              #   backoff, cron guard, rate limiter, Retry-After, agent triggers,
                              #   account deletion, feature flags, service manifests, signing v1, agent-proxy,
-                             #   service cards
-supabase test db             # 371 pgTAP assertions: RLS, privileges, idempotency, append-only
+                             #   service cards, service decisions + deletion fan-out
+supabase test db             # 406 pgTAP assertions: RLS, privileges, idempotency, append-only
                              #   audit, retry claims + leases, rotation, rate-limit windows,
                              #   agent triggers, token ownership, owner-only agents, account
                              #   deletion
 scripts/e2e-core-loop.sh     # 79-check end-to-end run against the running stack
 scripts/e2e-service-cards.sh # agent → Cockpit cards (inbound keys): flag off (4) + on (52); serves itself
+scripts/e2e-service-decisions.sh # service decisions + deletion fan-out: on (47) + off (5); serves itself
 scripts/e2e-agent-proxy.sh   # agent-proxy + signing v1 vs the stub agent: flag off (5) + on (69);
                              #   stop any running `functions serve` first — it serves them itself
 scripts/e2e-agent-trigger.sh # Agent Triggers: flag on (30 checks) + flag off (8); stop any
@@ -229,6 +233,10 @@ Cockpit-hosted agent services a workspace switches on from the app. The app scre
 The proxy forwards only manifest ops, signed with **Cockpit-Signature v1**: see **[docs/agent-gateway-wire-v1.md](docs/agent-gateway-wire-v1.md)** and the test vectors in `_tests/vectors/signature_v1.json`. It also applies the class timeouts and retries, per-user rate limits per op class, a circuit breaker (0012) and ids-only `gateway_call` rows. It answers the built-ins `service.enable` / `service.disable` itself.
 
 **`POST agent-service-inbound`** (0013, no JWT) is where agents post review cards (`create` / `update` / `withdraw`), signed with the service's separate **inbound** key pair over the canonical path `/cockpit/v1/inbound/cards` (wire spec §6). Card type `social_post_draft` is summary only: no caption, hashtags, image or URL; the audit keeps only the hook; the push uses fixed text. Every authenticity failure is the same `401 unauthorized`. `register-service.ts` prints four keys (`outbound current/next`, `inbound current/next`); services registered before 0013 get the inbound pair at their next `--rotate-keys`. Inbound rotation is `swap_service_inbound_keys`.
+
+**Decisions on service cards** (0014, `actions-decision`, behind the flag) allow `approved` / `rejected` only. **Approve calls the agent first** (`decision.apply`, signed v1, the app's `Idempotency-Key` as request id); the card is recorded and closed only after the agent says yes, otherwise it stays pending and the agent's declared error (e.g. `approval_blocked`) or `agent_unavailable` / `agent_timeout` is returned. **Reject is recorded first**, then delivered to `decision.apply` with the callback retry machinery (`callbacks-retry`, 8 attempts with backoff; `conflict` / `idea_final` / `not_found` from the agent count as delivered). Ordinary agents are unchanged.
+
+**Account deletion** (0014) queues one `service_deletion_job` (slug + subject, no PII) per service the workspace consented to or used; **`service-deletions-retry`** (pg_cron every 5 min, cron secret, behind the flag) calls each service's `deletion_op` with destructive rules and marks the job done (also on `not_found`), retrying with backoff. It needs the Vault secret `cockpit_service_deletions_retry_url` (docs/DEPLOY.md step 5).
 
 - **Tables:** `agent_service` (registry: slug, display data, `base_url`, `status` draft / active / paused / retired, `contract_version`, `min_app_version`, `manifest` with ops, card types, data categories and deletion op, `ui` native / sdui, `ui_schema_version`, signing key Vault ids, circuit-breaker fields) · `service_access` (one row per workspace and service: state, subject, consent, first use) · `gateway_rate` · `gateway_nonce` · `gateway_call` (ids and numbers only) · `service_deletion_job` (outbox, no FK to workspace, no PII).
 - **Existing tables:** `agent.platform` adds `'service'`. Only service agents may have no `callback_url` / inbound secret. `action.revision` (default 1). `audit_entry` adds `action_updated`, `action_withdrawn`, `service_enabled`, `service_disabled`.

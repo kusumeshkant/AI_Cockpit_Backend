@@ -445,6 +445,10 @@ verify_jwt = true
 [functions.agent-service-inbound]
 verify_jwt = false
 
+# Service deletion fan-out (0014): pg_cron only, checks X-Cron-Secret.
+[functions.service-deletions-retry]
+verify_jwt = false
+
 [functions.agents-configure-trigger]
 verify_jwt = true
 

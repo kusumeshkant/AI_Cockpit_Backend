@@ -139,6 +139,8 @@ export interface AgentCall {
   requestId: string;
   op: ServiceOp;
   timeoutMs: number;
+  /** Overrides the class's attempt count (deliveries / jobs retry by backoff instead). */
+  maxAttempts?: number;
 }
 
 /** Injected I/O. */
@@ -159,7 +161,7 @@ export async function callAgent(
   io: CallIo,
 ): Promise<{ outcome: AttemptOutcome; attempts: number }> {
   const path = new URL(call.url).pathname;
-  const limit = maxAttempts(call.op.class);
+  const limit = call.maxAttempts ?? maxAttempts(call.op.class);
   let outcome: AttemptOutcome = { kind: 'network' };
   let attempts = 0;
   while (attempts < limit) {

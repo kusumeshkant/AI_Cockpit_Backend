@@ -60,6 +60,8 @@ export interface RetryRunResponse {
   delivered: number;
   rescheduled: number;
   failed: number;
+  /** Service decisions left for later while agent_services is off (0014; absent otherwise). */
+  skipped?: number;
 }
 
 /** Agent trigger run state (mirrors `trigger_run.status`). */
