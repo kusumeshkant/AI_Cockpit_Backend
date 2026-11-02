@@ -17,6 +17,18 @@ export type ErrorCode =
   | 'rate_limited'
   | 'feature_disabled'
   | 'trigger_disabled'
+  // Agent services gateway (0011).
+  | 'agent_unavailable'
+  | 'agent_timeout'
+  | 'agent_error'
+  | 'agent_paused'
+  | 'trial_ended'
+  | 'quota_reached'
+  | 'approval_blocked'
+  | 'unsupported_op'
+  | 'app_update_required'
+  | 'service_not_found'
+  | 'service_not_enabled'
   | 'server';
 
 /** HTTP status for each code. */
@@ -34,6 +46,17 @@ export const STATUS_BY_CODE: Readonly<Record<ErrorCode, number>> = {
   rate_limited: 429,
   feature_disabled: 404,
   trigger_disabled: 409,
+  agent_unavailable: 503,
+  agent_timeout: 504,
+  agent_error: 502,
+  agent_paused: 503,
+  trial_ended: 403,
+  quota_reached: 403,
+  approval_blocked: 422,
+  unsupported_op: 422,
+  app_update_required: 426,
+  service_not_found: 404,
+  service_not_enabled: 403,
   server: 500,
 };
 
@@ -76,6 +99,12 @@ export function fromPostgrest(error: PostgrestError): AppError {
       return new AppError('agent_disabled', 'Agent is disabled');
     case 'forbidden':
       return new AppError('forbidden', 'Only the workspace owner can do this');
+    case 'service_not_found':
+      return new AppError('service_not_found', 'Service not found');
+    case 'service_paused':
+      return new AppError('agent_paused', 'The service is paused');
+    case 'service_blocked':
+      return new AppError('service_not_enabled', 'The service is not available for this workspace');
     case 'invalid_decision':
     case 'invalid_idempotency_key':
     case 'invalid_secret':
@@ -88,6 +117,10 @@ export function fromPostgrest(error: PostgrestError): AppError {
     case 'invalid_min_interval':
     case 'invalid_enabled':
     case 'invalid_user':
+    case 'invalid_consent_version':
+    case 'invalid_op_class':
+    case 'invalid_op':
+    case 'invalid_gateway_call':
       return new AppError('validation', error.message);
   }
   // Check-constraint / invalid-input violations are client errors.

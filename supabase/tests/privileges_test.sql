@@ -4,7 +4,7 @@
 -- (prod sign-in: 42501 on the profile read). Any drift — a missing grant or
 -- an extra one — fails here. Keep in sync with 0009's header and
 -- scripts/deploy-check.ts (EXPECTED_PRIVILEGES). Later migrations extend it:
--- 0010 feature_setting.
+-- 0010 feature_setting; 0011 agent services.
 begin;
 create extension if not exists pgtap with schema extensions;
 
@@ -24,7 +24,9 @@ select set_eq(
      where n.nspname = 'public' and c.relkind in ('r', 'p', 'v', 'm', 'f')$$,
   $$values ('workspace'), ('app_user'), ('agent'), ('action'), ('audit_entry'),
            ('agent_rate'), ('agent_trigger'), ('trigger_run'),
-           ('account_deletion_log'), ('reviewer_signin_guard'), ('feature_setting')$$,
+           ('account_deletion_log'), ('reviewer_signin_guard'), ('feature_setting'),
+           ('agent_service'), ('service_access'), ('gateway_rate'), ('gateway_nonce'),
+           ('gateway_call'), ('service_deletion_job')$$,
   'every public table and view is covered by the matrix (add new ones here and in 0009)');
 
 select set_eq(
@@ -37,7 +39,9 @@ select set_eq(
   $$select 'service_role' as role, t as tbl, p as priv
       from unnest(array['workspace', 'app_user', 'agent', 'action', 'agent_rate',
                         'agent_trigger', 'trigger_run', 'account_deletion_log',
-                        'reviewer_signin_guard', 'feature_setting']) t,
+                        'reviewer_signin_guard', 'feature_setting', 'agent_service',
+                        'service_access', 'gateway_rate', 'gateway_nonce', 'gateway_call',
+                        'service_deletion_job']) t,
            unnest(array['SELECT', 'INSERT', 'UPDATE', 'DELETE']) p
     union all select * from (values ('service_role', 'audit_entry', 'SELECT'),
                      ('service_role', 'audit_entry', 'INSERT'),
@@ -65,7 +69,12 @@ select set_eq(
                                 'edited_payload', 'metadata', 'created_at']),
         ('agent_trigger', array['agent_id', 'workspace_id', 'trigger_url', 'secret_hint',
                                 'enabled', 'min_interval_secs', 'created_at', 'updated_at']),
-        ('feature_setting', array['key', 'enabled', 'min_app_version'])
+        ('feature_setting', array['key', 'enabled', 'min_app_version']),
+        ('agent_service', array['slug', 'display_name', 'description', 'icon', 'status',
+                                'contract_version', 'min_app_version', 'ui', 'ui_schema_version']),
+        ('service_access', array['workspace_id', 'service_slug', 'agent_id', 'state',
+                                 'consent_version', 'consented_at', 'first_used_at',
+                                 'created_at', 'updated_at'])
       ) m(t, cols), unnest(m.cols) col$$,
   'column-level privileges: authenticated reads exactly the columns the app selects');
 
@@ -73,7 +82,11 @@ select is(
   (select count(*)::int
      from unnest(array['anon', 'authenticated']) r
      cross join (values ('app_user', 'fcm_tokens'), ('agent', 'inbound_secret_id'),
-                        ('agent_trigger', 'trigger_secret_id'), ('action', 'callback_status')) s(t, col)
+                        ('agent_trigger', 'trigger_secret_id'), ('action', 'callback_status'),
+                        ('agent_service', 'base_url'), ('agent_service', 'manifest'),
+                        ('agent_service', 'signing_key_current_id'),
+                        ('agent_service', 'signing_key_next_id'),
+                        ('service_access', 'subject')) s(t, col)
     where has_column_privilege(r, format('public.%I', s.t), s.col, 'SELECT')),
   0, 'no client role can read push tokens, Vault secret ids or callback internals');
 
@@ -129,7 +142,13 @@ select set_eq(
       ('service_role',  'begin_trigger_run(uuid, uuid)'),
       ('service_role',  'record_trigger_result(uuid, boolean, text)'),
       ('service_role',  'delete_account_data(uuid)'),
-      ('service_role',  'reviewer_signin_attempt(text)')$$,
+      ('service_role',  'reviewer_signin_attempt(text)'),
+      ('service_role',  'resolve_service_access(uuid, text)'),
+      ('service_role',  'enable_service(uuid, text, text)'),
+      ('service_role',  'disable_service(uuid, text)'),
+      ('service_role',  'hit_gateway_rate(uuid, text, text, integer, interval)'),
+      ('service_role',  'record_gateway_call(uuid, text, text, integer, integer)'),
+      ('service_role',  'register_agent_service(text, text, text, text, text, text, text, jsonb, text, text, text)')$$,
   'function EXECUTE: authenticated only the RLS helper and its two RPCs, service_role the Edge Function RPCs, anon and PUBLIC nothing');
 
 -- ---------------------------------------------------------------------------

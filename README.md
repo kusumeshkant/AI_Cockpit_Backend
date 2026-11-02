@@ -12,6 +12,7 @@ product/backend/
 ├─ scripts/
 │  ├─ e2e-agent-trigger.sh / .ts     # Agent Triggers e2e (serves functions flag on + off)
 │  ├─ set-feature.ts                 # switch a feature_setting flag on / off (service role)
+│  ├─ register-service.ts            # register / update an agent service (+ examples/*.service.json)
 │  ├─ e2e-core-loop.sh               # runs the end-to-end check
 │  ├─ e2e-core-loop.ts               #   (Deno: fetch, HMAC, local callback receiver)
 │  ├─ e2e-test-action.sh / .ts       # agents-test-action access rules (owner-only)
@@ -29,7 +30,8 @@ product/backend/
    │  ├─ 0007_account_deletion.sql   # delete_account_data RPC, erasure-only audit bypass,
    │  │                              #   account_deletion_log (no PII)
    │  ├─ 0008 … 0009                 # reviewer sign-in guard; explicit Data API grants
-   │  └─ 0010_feature_settings.sql   # feature_setting flags (DB is the source of truth)
+   │  ├─ 0010_feature_settings.sql   # feature_setting flags (DB is the source of truth)
+   │  └─ 0011_agent_services.sql     # agent services gateway: registry, access, rate, calls
    ├─ functions/
    │  ├─ _shared/                    # library (not deployed): env, http, errors, logger,
    │  │                              #   supabase, hmac, vault, fcm, push, callback, delivery,
@@ -80,10 +82,10 @@ supabase functions serve --no-verify-jwt --env-file supabase/functions/.env
 
 ```bash
 deno task lint               # deno lint (functions + scripts)
-deno task test               # 90 unit tests: hmac, validation, errors/logger, fcm, callback,
+deno task test               # 97 unit tests: hmac, validation, errors/logger, fcm, callback,
                              #   backoff, cron guard, rate limiter, Retry-After, agent triggers,
-                             #   account deletion, feature flags
-supabase test db             # 222 pgTAP assertions: RLS, privileges, idempotency, append-only
+                             #   account deletion, feature flags, service manifests
+supabase test db             # 299 pgTAP assertions: RLS, privileges, idempotency, append-only
                              #   audit, retry claims + leases, rotation, rate-limit windows,
                              #   agent triggers, token ownership, owner-only agents, account
                              #   deletion
@@ -206,6 +208,24 @@ Follow **[docs/DEPLOY.md](docs/DEPLOY.md)**: project setup (ap-south-1), migrati
 ## Agent Triggers (feature-flagged)
 
 The reverse direction: a signed-in user starts an agent. **Off by default.** Both functions answer `404 feature_disabled` (before auth or any RPC) unless the `agent_triggers` feature flag is on.
+
+## Agent services (0011, backend base only)
+
+Cockpit-hosted agent services a workspace switches on from the app. **This migration adds data and RPCs only**; the `agent-proxy` function and the app screens come later, and the `agent_services` feature flag stays off.
+
+- **Tables:** `agent_service` (registry: slug, display data, `base_url`, `status` draft / active / paused / retired, `contract_version`, `min_app_version`, `manifest` with ops, card types, data categories and deletion op, `ui` native / sdui, `ui_schema_version`, signing key Vault ids, circuit-breaker fields) · `service_access` (one row per workspace and service: state, subject, consent, first use) · `gateway_rate` · `gateway_nonce` · `gateway_call` (ids and numbers only) · `service_deletion_job` (outbox, no FK to workspace, no PII).
+- **Existing tables:** `agent.platform` adds `'service'`. Only service agents may have no `callback_url` / inbound secret. `action.revision` (default 1). `audit_entry` adds `action_updated`, `action_withdrawn`, `service_enabled`, `service_disabled`.
+- **RPCs (service role):** `resolve_service_access`, `enable_service` / `disable_service` (owner only, idempotent, audited; enable records consent and creates the workspace's service agent on first enable), `hit_gateway_rate`, `record_gateway_call`, `register_agent_service` (admin).
+- **App reads:** signed-in users see a safe column list of active / paused services (never `base_url`, the manifest or key ids) and their own workspace's `service_access` (not `subject` / `consented_by`).
+
+```bash
+eval "$(supabase status -o env | grep -E '^(API_URL|SERVICE_ROLE_KEY)=' | sed 's/^/export /')"   # local
+deno run --allow-net --allow-env --allow-read scripts/register-service.ts scripts/examples/content-creator.service.json
+#   new service → draft + two signing secrets in Vault, printed ONCE
+#   --status active|paused|retired · --rotate-keys (prints the new pair once)
+```
+
+The manifest is validated by `_shared/service_manifest.ts`; the database checks only its shape.
 
 ## Feature flags (0010)
 
