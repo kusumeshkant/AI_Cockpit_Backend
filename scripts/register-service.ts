@@ -10,6 +10,11 @@
 //     service; they are never logged, written to a file, or retrievable later.
 //   * Existing service: fields updated, status kept (unless --status), keys
 //     kept (unless --rotate-keys, which replaces both and prints them once).
+//     ⚠️ NEVER use --rotate-keys on a live service: replacing both keys at
+//     once fails every call until the agent has the new pair. Live rotation
+//     is the swap_service_signing_keys RPC (0012), which agents survive.
+//   * Output lines `current: <key id> <secret>` / `next: <key id> <secret>`;
+//     the key id is what Cockpit sends as X-Cockpit-Key-Id (0012).
 //
 // Env (service role; values are never printed):
 //   SUPABASE_URL or API_URL                        project / local API URL
@@ -116,9 +121,15 @@ if (!response.ok) {
 const [row] = await response.json() as { slug: string; status: string; created: boolean }[];
 console.log(`${row.slug}: ${row.created ? 'created' : 'updated'}, status ${row.status} (${new URL(apiUrl).host})`);
 if (current && next) {
-  console.log('\nSigning secrets — shown ONCE, copy them into the service now:');
-  console.log(`  current: ${current}`);
-  console.log(`  next:    ${next}`);
+  // Key ids are sent as X-Cockpit-Key-Id; the agent maps them to the secrets.
+  const ids = await fetch(
+    `${apiUrl}/rest/v1/agent_service?slug=eq.${encodeURIComponent(row.slug)}` +
+      '&select=signing_key_current_id,signing_key_next_id',
+    { headers },
+  ).then((r) => (r.ok ? r.json() : [])) as { signing_key_current_id: string; signing_key_next_id: string }[];
+  console.log('\nSigning keys — secrets shown ONCE, copy them into the service now (key id, secret):');
+  console.log(`  current: ${ids[0]?.signing_key_current_id ?? '?'} ${current}`);
+  console.log(`  next:    ${ids[0]?.signing_key_next_id ?? '?'} ${next}`);
 } else {
   console.log('Signing keys unchanged.');
 }

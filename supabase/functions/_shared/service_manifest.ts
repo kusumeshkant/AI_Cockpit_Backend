@@ -13,6 +13,28 @@ export const SERVICE_ROLES = ['owner', 'approver'] as const;
 /** Upper bound for an op's timeout. */
 export const MAX_OP_TIMEOUT_MS = 30_000;
 
+/** Per-class timeout when the op sets none (wire spec v1). */
+export const DEFAULT_TIMEOUT_MS: Readonly<Record<(typeof OP_CLASSES)[number], number>> = {
+  read: 8_000,
+  write: 10_000,
+  destructive: 10_000,
+};
+
+/**
+ * Agent error codes Cockpit may show to users, if the manifest declares them
+ * (`errors`). Anything else an agent returns becomes `agent_error`.
+ */
+export const PASSABLE_AGENT_ERRORS = [
+  'validation',
+  'not_found',
+  'conflict',
+  'trial_ended',
+  'quota_reached',
+  'approval_blocked',
+  'agent_paused',
+  'idea_final',
+] as const;
+
 /** Upper bound for an op's request / response size caps (1 MiB). */
 export const MAX_OP_BYTES = 1_048_576;
 
@@ -26,7 +48,7 @@ export const ServiceOpSchema = z.object({
     (roles) => new Set(roles).size === roles.length,
     'roles must be unique',
   ),
-  timeout_ms: z.number().int().min(1).max(MAX_OP_TIMEOUT_MS),
+  timeout_ms: z.number().int().min(1).max(MAX_OP_TIMEOUT_MS).optional(),
   max_request_bytes: z.number().int().min(1).max(MAX_OP_BYTES),
   max_response_bytes: z.number().int().min(1).max(MAX_OP_BYTES),
 }).strict();
@@ -42,6 +64,7 @@ export const ServiceManifestSchema = z.object({
   card_types: z.array(z.string().regex(IDENT)).default([]),
   data_categories: z.array(z.string().regex(IDENT)).min(1),
   deletion_op: z.string().regex(OP_NAME),
+  errors: z.array(z.enum(PASSABLE_AGENT_ERRORS)).default([]),
 }).strict().superRefine((manifest, ctx) => {
   const deletion = manifest.ops[manifest.deletion_op];
   if (!deletion) {
@@ -71,6 +94,14 @@ export type ServiceRegistration = z.infer<typeof ServiceRegistrationSchema>;
 
 /** Parsed manifest. */
 export type ServiceManifest = z.infer<typeof ServiceManifestSchema>;
+
+/** One parsed op. */
+export type ServiceOp = z.infer<typeof ServiceOpSchema>;
+
+/** The op's timeout: its own, else the class default. */
+export function opTimeoutMs(op: ServiceOp): number {
+  return op.timeout_ms ?? DEFAULT_TIMEOUT_MS[op.class];
+}
 
 /** New signing secret: `svcsig_` + 32 random bytes, base64url. */
 export function generateServiceSigningSecret(): string {
