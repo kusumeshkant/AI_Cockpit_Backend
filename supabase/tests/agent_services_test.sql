@@ -7,7 +7,7 @@
 begin;
 create extension if not exists pgtap with schema extensions;
 
-select plan(77);
+select plan(83);
 
 -- ---------------------------------------------------------------------------
 -- Fixtures: owner Olive + approver Pete (same workspace), owner Quinn (other).
@@ -335,9 +335,51 @@ select throws_ok(
 insert into public.agent_service (slug, display_name, base_url, manifest)
 values ('hidden-draft', 'Hidden', 'https://hidden.example', (select manifest from m));
 
+-- Agent RLS (0011): service agents are hidden from clients, ordinary agents
+-- are not; an action of a service agent stays visible with a null agent embed.
+select set_config('t.svc_action',   'd4d4d4d4-d4d4-4d4d-8d4d-d4d4d4d4d4d4', true);
+select set_config('t.plain_action', 'e5e5e5e5-e5e5-4e5e-8e5e-e5e5e5e5e5e5', true);
+insert into public.action (id, workspace_id, agent_id, external_id, type, title)
+values
+  (current_setting('t.svc_action')::uuid, current_setting('t.ws')::uuid,
+   current_setting('t.svc_agent')::uuid, 'svc-1', 'post_draft', 'Service draft'),
+  (current_setting('t.plain_action')::uuid, current_setting('t.ws')::uuid,
+   current_setting('t.plain')::uuid, 'plain-1', 'email', 'Plain draft');
+
+set local role service_role;
+select is((select count(*)::int from public.agent where id = current_setting('t.svc_agent')::uuid),
+  1, 'service_role sees the service agent');
+reset role;
+
+set local role authenticated;
+select set_config('request.jwt.claims',
+  json_build_object('sub', current_setting('t.pete'), 'role', 'authenticated')::text, true);
+select results_eq(
+  $$select id::text, name, platform from public.agent order by created_at$$,
+  $$values (current_setting('t.plain'), 'Plain agent'::text, 'n8n'::text)$$,
+  'an approver sees the ordinary agents as before, not the service agent');
+reset role;
+
 set local role authenticated;
 select set_config('request.jwt.claims',
   json_build_object('sub', current_setting('t.olive'), 'role', 'authenticated')::text, true);
+select results_eq(
+  $$select id::text, name, platform from public.agent order by created_at$$,
+  $$values (current_setting('t.plain'), 'Plain agent'::text, 'n8n'::text)$$,
+  'the owner sees the ordinary agents as before');
+select is_empty(
+  $$select id from public.agent where platform = 'service' or id = current_setting('t.svc_agent')::uuid$$,
+  'the service agent row is invisible to the app');
+-- PostgREST's embed action → agent:agent_id(name, platform) is a left join
+-- under the agent policy.
+select results_eq(
+  $$select a.id::text, g.name, g.platform
+      from public.action a left join public.agent g on g.id = a.agent_id
+     where a.id in (current_setting('t.svc_action')::uuid, current_setting('t.plain_action')::uuid)
+     order by a.title$$,
+  $$values (current_setting('t.plain_action'), 'Plain agent'::text, 'n8n'::text),
+           (current_setting('t.svc_action'), null::text, null::text)$$,
+  'the action stays visible; its service agent embed is null, an ordinary one is not');
 
 select results_eq(
   $$select slug, display_name, status, ui, ui_schema_version from public.agent_service order by slug$$,
@@ -370,6 +412,7 @@ reset role;
 
 set local role anon;
 select throws_ok($$select slug from public.agent_service$$, '42501', null, 'anon reads no services');
+select throws_ok($$select id from public.agent$$, '42501', null, 'anon reads no agents');
 reset role;
 
 -- ---------------------------------------------------------------------------

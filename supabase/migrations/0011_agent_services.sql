@@ -20,6 +20,7 @@
 -- agent: platform gains 'service'. A service agent (one per workspace and
 -- service, created by enable_service) has no callback_url / inbound secret —
 -- allowed ONLY for platform = 'service'; every other row keeps both required.
+-- The agent select policy hides service agents from authenticated clients.
 -- action: `revision` (edits by the service bump it later). audit_entry: four
 -- new events; the two service events carry no action.
 --
@@ -55,6 +56,15 @@ alter table public.agent alter column callback_url drop not null;
 alter table public.agent alter column inbound_secret_id drop not null;
 alter table public.agent add constraint agent_endpoint_required check (
   platform = 'service' or (callback_url is not null and inbound_secret_id is not null));
+
+-- Service agents stay invisible to the app (and to builds already shipped,
+-- whose agent parser requires a callback_url). Same policy as 0001 plus the
+-- platform filter; only this policy changes. Embeds such as
+-- action → agent:agent_id(name, platform) then yield a null agent.
+drop policy agent_select_own_workspace on public.agent;
+create policy agent_select_own_workspace on public.agent
+  for select to authenticated
+  using (workspace_id = public.current_workspace_id() and platform <> 'service');
 
 alter table public.action add column revision integer not null default 1
   check (revision >= 1);
