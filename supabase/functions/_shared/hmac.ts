@@ -86,6 +86,12 @@ export const V1_HEADERS = {
   signature: 'X-Cockpit-Signature',
 } as const;
 
+/**
+ * Canonical path signed by agents for agent → Cockpit card requests (0013),
+ * whatever URL they post to. Same string-to-sign and headers otherwise.
+ */
+export const V1_INBOUND_CARD_PATH = '/cockpit/v1/inbound/cards';
+
 /** Max clock difference (seconds) a verifier accepts. */
 export const V1_MAX_SKEW_SECONDS = 60;
 

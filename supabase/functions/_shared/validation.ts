@@ -1,5 +1,6 @@
 // Request schemas and URL policy. Unknown fields are rejected (.strict()).
 import { z } from './deps.ts';
+import { AppError } from './errors.ts';
 import { DECISIONS, PLATFORMS } from './types.ts';
 
 /** Max raw body sizes (bytes). */
@@ -158,4 +159,132 @@ export function isAllowedCallbackUrl(value: string, allowInsecure: boolean): boo
   if (allowInsecure) return url.protocol === 'https:' || url.protocol === 'http:';
   if (url.protocol !== 'https:') return false;
   return !PRIVATE_HOST_PATTERNS.some((pattern) => pattern.test(url.hostname));
+}
+
+// -----------------------------------------------------------------------------
+// Service cards (0013, agent-service-inbound). Per-type schemas: Cockpit stores
+// a SUMMARY only — no caption, hashtags, image or URL fields, and no URL text
+// anywhere. Existing card types (actions-inbound) are untouched.
+// -----------------------------------------------------------------------------
+
+/** Max raw body of an agent-service-inbound request. */
+export const MAX_SERVICE_CARD_BYTES = 16 * 1024;
+
+/** Max card lifetime (agents keep their data for 30 days). */
+export const MAX_CARD_TTL_DAYS = 30;
+
+/** Card lifetime when the agent asks for none. */
+export const DEFAULT_CARD_TTL_DAYS = 7;
+
+// Links only: a scheme or a www. prefix (bare words like "Mornings.In" are text).
+const URL_LIKE = /(https?:\/\/|www\.)/i;
+
+/** A short, single-line text without anything URL-like. */
+const plainText = (max: number) =>
+  z.string().trim().min(1).max(max).refine((s) => !URL_LIKE.test(s), 'URLs are not allowed')
+    .refine((s) => !/[\r\n]/.test(s), 'single line only');
+
+/** `social_post_draft` (content creator): a post idea awaiting review. */
+export const SocialPostDraftCardSchema = z
+  .object({
+    type: z.literal('social_post_draft'),
+    title: plainText(80),
+    summary: plainText(140),
+    payload: z
+      .object({
+        schema: z.literal(1),
+        service: z.string().regex(/^[a-z][a-z0-9-]{1,39}$/),
+        idea_id: z.string().min(1).max(100).regex(/^[A-Za-z0-9._:-]+$/),
+        format: z.enum(['reel', 'carousel', 'photo', 'story']),
+        topic: plainText(80),
+        hook: plainText(140),
+        findings: z
+          .object({
+            blocking: z.number().int().min(0).max(99),
+            to_fix: z.number().int().min(0).max(99),
+            warnings: z.number().int().min(0).max(99),
+          })
+          .strict(),
+        revision: z.number().int().min(1),
+      })
+      .strict(),
+    editable_fields: z.array(z.string()).max(0, 'editable_fields must be empty').default([]),
+    expires_at: z.string().datetime({ offset: true }).optional(),
+  })
+  .strict();
+
+/** Card schemas by type. A type must also be in the service's `card_types`. */
+export const SERVICE_CARD_SCHEMAS = {
+  social_post_draft: SocialPostDraftCardSchema,
+} as const;
+
+/** A known service card type. */
+export type ServiceCardType = keyof typeof SERVICE_CARD_SCHEMAS;
+
+/** A parsed service card. */
+export type ServiceCard = z.infer<typeof SocialPostDraftCardSchema>;
+
+/** `agent-service-inbound` body. The card is validated per type afterwards. */
+export const ServiceInboundSchema = z.discriminatedUnion('op', [
+  z.object({
+    service: z.string().regex(/^[a-z][a-z0-9-]{1,39}$/),
+    op: z.literal('create'),
+    external_id: z.string().min(1).max(200).regex(/^[A-Za-z0-9._:-]+$/),
+    card: z.record(z.string(), z.unknown()),
+  }).strict(),
+  z.object({
+    service: z.string().regex(/^[a-z][a-z0-9-]{1,39}$/),
+    op: z.literal('update'),
+    external_id: z.string().min(1).max(200).regex(/^[A-Za-z0-9._:-]+$/),
+    revision: z.number().int().min(1),
+    card: z.record(z.string(), z.unknown()),
+  }).strict(),
+  z.object({
+    service: z.string().regex(/^[a-z][a-z0-9-]{1,39}$/),
+    op: z.literal('withdraw'),
+    external_id: z.string().min(1).max(200).regex(/^[A-Za-z0-9._:-]+$/),
+    reason_code: z.string().regex(/^[a-z][a-z0-9_]{0,39}$/).default('withdrawn'),
+  }).strict(),
+]);
+
+/** Parsed `agent-service-inbound` body. */
+export type ServiceInbound = z.infer<typeof ServiceInboundSchema>;
+
+/**
+ * Validates [card] against its type's schema and the service's allow-list.
+ * Throws `validation` (field paths only, never values).
+ */
+export function parseServiceCard(
+  card: Record<string, unknown>,
+  service: string,
+  allowedTypes: readonly string[],
+): ServiceCard {
+  const type = card.type;
+  if (typeof type !== 'string' || !Object.hasOwn(SERVICE_CARD_SCHEMAS, type) || !allowedTypes.includes(type)) {
+    throw new AppError('validation', 'Unsupported card type');
+  }
+  const parsed = SERVICE_CARD_SCHEMAS[type as ServiceCardType].safeParse(card);
+  if (!parsed.success) {
+    throw new AppError(
+      'validation',
+      'Invalid card',
+      parsed.error.issues.map((issue) => ({ path: issue.path.join('.'), message: issue.message })),
+    );
+  }
+  if (parsed.data.payload.service !== service) {
+    throw new AppError('validation', 'Invalid card', [{ path: 'payload.service', message: 'must match service' }]);
+  }
+  return parsed.data;
+}
+
+/**
+ * The stored expiry: the requested time capped at now + 30 days, default
+ * now + 7 days; a time in the past is invalid.
+ */
+export function cardExpiry(requested: string | undefined, nowMs: number): string {
+  const max = nowMs + MAX_CARD_TTL_DAYS * 86_400_000;
+  if (requested === undefined) return new Date(nowMs + DEFAULT_CARD_TTL_DAYS * 86_400_000).toISOString();
+  const at = Date.parse(requested);
+  if (!(at > nowMs)) throw new AppError('validation', 'expires_at must be in the future');
+  return new Date(Math.min(at, max)).toISOString();
 }

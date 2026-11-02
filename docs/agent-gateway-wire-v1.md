@@ -1,6 +1,8 @@
-# Agent gateway wire contract v1 (as Cockpit implements it)
+# Agent gateway wire contract v1 (as Cockpit implements it) — v1 rev 2
 
-Cockpit's `agent-proxy` is the only caller of an agent service. This is the HTTP contract between them. Code: `supabase/functions/_shared/hmac.ts` (signing), `_shared/gateway.ts` (calls, retries, mapping), `scripts/stub-agent.ts` (a reference agent). Test vectors: `supabase/functions/_tests/vectors/signature_v1.json`.
+> **rev 2 (0013):** adds §6, agent → Cockpit cards, with a separate inbound key pair. §1–§5 are unchanged.
+
+Cockpit's `agent-proxy` is the only caller of an agent service (§1–§5). Agents send review cards back through `agent-service-inbound` (§6). This is the HTTP contract between them. Code: `supabase/functions/_shared/hmac.ts` (signing), `_shared/gateway.ts` (calls, retries, mapping), `scripts/stub-agent.ts` (a reference agent). Test vectors: `supabase/functions/_tests/vectors/signature_v1.json`.
 
 ## 1. Request: Cockpit → agent
 
@@ -46,7 +48,7 @@ signature      = "v1=" + hex(HMAC-SHA256(signing_secret, string_to_sign))
 - `path` is the URL path as sent, e.g. `/cockpit/v1/ops/ideas.list`. If `base_url` has a path prefix, the prefix is included.
 - Every string is UTF-8, there's no trailing newline, and hex is lowercase.
 - Compare signatures in constant time.
-- Each service has two signing keys, **current** and **next**. Cockpit signs with current. Rotation swaps them, so the agent must accept both key ids at all times. The key ids and secrets are given once at registration (`register-service.ts` prints `current: <key id> <secret>` and `next: <key id> <secret>`).
+- Each service has two signing keys, **current** and **next**. Cockpit signs with current. Rotation swaps them, so the agent must accept both key ids at all times. The key ids and secrets are given once at registration (`register-service.ts` prints `outbound current: <key id> <secret>` and `outbound next: <key id> <secret>`; the `inbound` pair is for §6).
 - ⚠️ **Operators: never run `register-service --rotate-keys` on a live service.** It replaces **both** keys at once, so calls fail until the agent is updated. Live rotation is `swap_service_signing_keys` (next ↔ current), which the agent survives because it accepts both ids.
 
 ## 2. What the agent must do
@@ -121,3 +123,101 @@ A manifest op may set `timeout_ms` (≤ 30 000). The timeout applies to each att
 ## 5. Cockpit-side guards (FYI for agent authors)
 
 The `agent_services` flag; registry status (`draft` / `retired` → not found, `paused` → `agent_paused`); workspace access (`service_not_enabled`, blocked looks the same); `min_app_version` (`app_update_required`); manifest ops only (`unsupported_op`) and their roles; per-user rate limits per op class (read 120 / write 30 / destructive 5 per minute); a 64 KB app body cap plus the op's `max_request_bytes`; a circuit breaker (5 consecutive agent failures → no calls for 30 s, then one trial call). Built-in ops `service.enable` / `service.disable` are handled by Cockpit and never reach the agent.
+
+## 6. Agent → Cockpit (cards)
+
+Agents post review cards to Cockpit; the app shows them in the feed, and a person approves or rejects them.
+
+```
+POST {cockpit}/functions/v1/agent-service-inbound
+```
+
+There is no JWT; the signature is the authentication. The endpoint sits behind the `agent_services` flag, and while the flag is off it answers `404 feature_disabled`.
+
+### Keys: a separate pair
+
+Every service has **two** key pairs. `register-service.ts` prints all four keys once:
+
+| Label | Direction | Agent's role |
+|---|---|---|
+| `outbound current` / `outbound next` | Cockpit → agent (§1) | **verifies** with them |
+| `inbound current` / `inbound next` | agent → Cockpit (§6) | **signs** with them |
+
+A leaked key never works in the other direction. Cockpit accepts both inbound key ids. Rotation is the `swap_service_inbound_keys` RPC (next ↔ current), which never fails a call. **Never** run `register-service --rotate-keys` on a live service: it replaces all four keys. A service registered before 0013 gets its inbound pair at its next `--rotate-keys`.
+
+### Signature
+
+Use the same headers and the same string-to-sign as §1, with these differences:
+
+- **`path` is always the constant `/cockpit/v1/inbound/cards`**, whatever URL you post to.
+- `X-Cockpit-Key-Id` is the **inbound** key id; sign with its secret.
+- `X-Cockpit-Workspace` is the workspace's `subject` (the value Cockpit sent you in §1).
+- `X-Cockpit-User` is the acting user id, or the literal `system` for agent-initiated work (e.g. automatic regeneration).
+- `X-Cockpit-Request-Id` is any id, for your own tracing (idempotency comes from `external_id`, below).
+- `X-Cockpit-Contract-Version` is `1.x`.
+- The window is ±60 s. Each `(key_id, nonce)` is accepted **once**; send a fresh nonce on every request.
+
+Test vectors: `supabase/functions/_tests/vectors/signature_v1_inbound.json`.
+
+### Body (JSON, ≤ 16 KB, unknown keys rejected)
+
+```json
+{ "service": "content-creator", "op": "create", "external_id": "idea_42", "card": { ... } }
+{ "service": "content-creator", "op": "update", "external_id": "idea_42", "revision": 2, "card": { ... } }
+{ "service": "content-creator", "op": "withdraw", "external_id": "idea_42", "reason_code": "regenerated" }
+```
+
+`external_id` (≤ 200, `[A-Za-z0-9._:-]`, e.g. `idea_<id>`) identifies the card. `reason_code` is snake_case, ≤ 40 characters, and defaults to `withdrawn`.
+
+### Card `social_post_draft` (summary only)
+
+```json
+{ "type": "social_post_draft",
+  "title": "Post idea: Morning routines",
+  "summary": "Three habits that save an hour",
+  "payload": { "schema": 1, "service": "content-creator", "idea_id": "idea_42",
+               "format": "carousel", "topic": "Morning routines",
+               "hook": "Three habits that save an hour",
+               "findings": { "blocking": 0, "to_fix": 1, "warnings": 2 },
+               "revision": 1 },
+  "expires_at": "2026-11-20T00:00:00Z" }
+```
+
+| Field | Rules |
+|---|---|
+| `title` | ≤ 80 characters ("Post idea: <topic>") |
+| `summary` | ≤ 140 characters: the hook |
+| `topic` | ≤ 80 characters |
+| `hook` | ≤ 140 characters |
+| `idea_id` | ≤ 100 characters |
+| `format` | `reel` / `carousel` / `photo` / `story` |
+| `findings.*` | integers 0–99 |
+| `revision` | integer ≥ 1 |
+| `payload.service` | must equal `service` |
+| `editable_fields` | must be absent or `[]` |
+
+- Text fields are single-line. **No links**: any text containing `http://`, `https://` or `www.` (any case) is refused. Words with dots, like "Mornings.In summer" or "Node.js", are fine.
+- There is **no caption, hashtag or image field**: Cockpit stores a summary only. The audit keeps only the hook, and push notifications never contain card text. A new card's push always reads "AI Cockpit" / "A post idea is ready for review".
+- The type must be listed in the manifest's `card_types`.
+- Expiry: default now + 7 days, capped at now + 30 days (your retention). A time in the past is invalid.
+
+### Ops and results
+
+Answer: `{ "ok": true, "data": { "result": "...", "action_id": "<uuid>" } }`
+
+| Op | When allowed | `result` |
+|---|---|---|
+| `create` | service `active` **and** workspace access `active` | `created`; `duplicate` (same `external_id`; nothing changes, no second push) |
+| `update` | card `pending`; service `active` or `paused` (fixes are fine); workspace access **`active`** (disabled or blocked → `service_not_enabled`) | `updated` (revision > current); `stale` (revision ≤ current, ignored); `noop` (card no longer pending) |
+| `withdraw` | any service or access state | `withdrawn` (pending → expired); `noop` (already decided / expired) |
+
+For `update`, `revision` must equal `card.payload.revision`. Updates replace title, summary and payload, and never push.
+
+### Errors
+
+- **Every authenticity failure** — bad or stale signature, unknown key id, replayed nonce, unknown service, unknown workspace subject, or a key from the wrong pair — answers the **same** `401 { "ok": false, "error": { "code": "unauthorized" } }`. Cockpit doesn't say which check failed. Check your clock, key ids, canonical path and nonces.
+- `422 validation` for the body, card, type or contract version; `413` for over 16 KB.
+- `503 agent_paused` when the service is paused (on create).
+- `403 service_not_enabled` when access is disabled or blocked (on create and update; withdraw is always allowed).
+- `404 service_not_found` when the service is retired; `404 not_found` for an unknown card on update / withdraw.
+- `429 rate_limited` + `Retry-After`: `INBOUND_RATE_LIMIT_PER_MINUTE` (default 60) per workspace and service.

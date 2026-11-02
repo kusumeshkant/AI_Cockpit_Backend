@@ -13,8 +13,11 @@
 //     ⚠️ NEVER use --rotate-keys on a live service: replacing both keys at
 //     once fails every call until the agent has the new pair. Live rotation
 //     is the swap_service_signing_keys RPC (0012), which agents survive.
-//   * Output lines `current: <key id> <secret>` / `next: <key id> <secret>`;
-//     the key id is what Cockpit sends as X-Cockpit-Key-Id (0012).
+//   * Four keys (0013): `outbound current|next` (Cockpit → agent; the agent
+//     verifies) and `inbound current|next` (agent → Cockpit cards; the agent
+//     signs), each printed as `<key id> <secret>`. A service registered
+//     before 0013 has no inbound pair until its next --rotate-keys (which,
+//     again, must not be run on a live service).
 //
 // Env (service role; values are never printed):
 //   SUPABASE_URL or API_URL                        project / local API URL
@@ -95,6 +98,9 @@ const isNew = ((await existing.json()) as unknown[]).length === 0;
 const writeKeys = isNew || rotate;
 const current = writeKeys ? generateServiceSigningSecret() : null;
 const next = writeKeys ? generateServiceSigningSecret() : null;
+// 0013: a separate pair for agent → Cockpit (cards), written together.
+const inboundCurrent = writeKeys ? generateServiceSigningSecret() : null;
+const inboundNext = writeKeys ? generateServiceSigningSecret() : null;
 
 const response = await fetch(`${apiUrl}/rest/v1/rpc/register_agent_service`, {
   method: 'POST',
@@ -111,6 +117,8 @@ const response = await fetch(`${apiUrl}/rest/v1/rpc/register_agent_service`, {
     p_status: status,
     p_signing_current: current,
     p_signing_next: next,
+    p_inbound_current: inboundCurrent,
+    p_inbound_next: inboundNext,
   }),
 });
 if (!response.ok) {
@@ -120,16 +128,21 @@ if (!response.ok) {
 }
 const [row] = await response.json() as { slug: string; status: string; created: boolean }[];
 console.log(`${row.slug}: ${row.created ? 'created' : 'updated'}, status ${row.status} (${new URL(apiUrl).host})`);
-if (current && next) {
-  // Key ids are sent as X-Cockpit-Key-Id; the agent maps them to the secrets.
+if (current && next && inboundCurrent && inboundNext) {
+  // Key ids travel as X-Cockpit-Key-Id; the agent maps them to the secrets.
   const ids = await fetch(
     `${apiUrl}/rest/v1/agent_service?slug=eq.${encodeURIComponent(row.slug)}` +
-      '&select=signing_key_current_id,signing_key_next_id',
+      '&select=signing_key_current_id,signing_key_next_id,inbound_key_current_id,inbound_key_next_id',
     { headers },
-  ).then((r) => (r.ok ? r.json() : [])) as { signing_key_current_id: string; signing_key_next_id: string }[];
+  ).then((r) => (r.ok ? r.json() : [])) as Record<string, string>[];
+  const id = (column: string) => ids[0]?.[column] ?? '?';
   console.log('\nSigning keys — secrets shown ONCE, copy them into the service now (key id, secret):');
-  console.log(`  current: ${ids[0]?.signing_key_current_id ?? '?'} ${current}`);
-  console.log(`  next:    ${ids[0]?.signing_key_next_id ?? '?'} ${next}`);
+  console.log('  Cockpit → agent (the agent VERIFIES with these):');
+  console.log(`    outbound current: ${id('signing_key_current_id')} ${current}`);
+  console.log(`    outbound next:    ${id('signing_key_next_id')} ${next}`);
+  console.log('  agent → Cockpit cards (the agent SIGNS with these):');
+  console.log(`    inbound current:  ${id('inbound_key_current_id')} ${inboundCurrent}`);
+  console.log(`    inbound next:     ${id('inbound_key_next_id')} ${inboundNext}`);
 } else {
   console.log('Signing keys unchanged.');
 }

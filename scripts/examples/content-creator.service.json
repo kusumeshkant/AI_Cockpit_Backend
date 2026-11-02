@@ -32,7 +32,7 @@
         "max_response_bytes": 4096
       }
     },
-    "card_types": ["post_draft"],
+    "card_types": ["social_post_draft"],
     "data_categories": ["content", "brand_profile"],
     "deletion_op": "subject.delete",
     "errors": ["validation", "not_found", "conflict", "quota_reached", "trial_ended"]

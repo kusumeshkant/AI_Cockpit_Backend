@@ -1,0 +1,47 @@
+{
+  "scheme": "Cockpit-Signature v1 (agent → Cockpit cards)",
+  "algorithm": "HMAC-SHA256",
+  "canonical_path": "/cockpit/v1/inbound/cards",
+  "secret": "svcsig_inbound_test_vector_secret_do_not_use_01",
+  "note": "Test-only INBOUND secret. path is always the canonical path, whatever URL is posted to. body is the exact raw JSON string.",
+  "vectors": [
+    {
+      "name": "create, acting user",
+      "input": {
+        "key_id": "22222222-3333-4444-8555-666666666666",
+        "timestamp": 1767225900,
+        "nonce": "7a1b2c3d-4e5f-4a6b-8c7d-9e0f1a2b3c4d",
+        "method": "POST",
+        "path": "/cockpit/v1/inbound/cards",
+        "workspace": "aaaaaaaa-1111-4aaa-8aaa-aaaaaaaaaaaa",
+        "user": "bbbbbbbb-2222-4bbb-8bbb-bbbbbbbbbbbb",
+        "request_id": "card-create-idea_42",
+        "body": "{\"service\":\"content-creator\",\"op\":\"create\",\"external_id\":\"idea_42\",\"card\":{\"type\":\"social_post_draft\",\"title\":\"Post idea: Morning routines\",\"summary\":\"Three habits that save an hour\",\"payload\":{\"schema\":1,\"service\":\"content-creator\",\"idea_id\":\"idea_42\",\"format\":\"carousel\",\"topic\":\"Morning routines\",\"hook\":\"Three habits that save an hour\",\"findings\":{\"blocking\":0,\"to_fix\":1,\"warnings\":2},\"revision\":1}}}"
+      },
+      "expected": {
+        "body_sha256": "f1476ad23a11bfcb2d66c6db642356d91b33d583a75e3b5e99f444c99a55817a",
+        "string_to_sign": "COCKPIT-V1\n22222222-3333-4444-8555-666666666666\n1767225900\n7a1b2c3d-4e5f-4a6b-8c7d-9e0f1a2b3c4d\nPOST\n/cockpit/v1/inbound/cards\nf1476ad23a11bfcb2d66c6db642356d91b33d583a75e3b5e99f444c99a55817a\naaaaaaaa-1111-4aaa-8aaa-aaaaaaaaaaaa\nbbbbbbbb-2222-4bbb-8bbb-bbbbbbbbbbbb\ncard-create-idea_42",
+        "signature": "v1=cf1ba1c2b8125613c2956bfbe4e18bd96289eb4a2a0462f6fbc7bdc7af0b2e6f"
+      }
+    },
+    {
+      "name": "withdraw, agent-initiated (user = system)",
+      "input": {
+        "key_id": "22222222-3333-4444-8555-666666666666",
+        "timestamp": 1767225960,
+        "nonce": "0f9e8d7c-6b5a-4c3d-9e2f-1a0b9c8d7e6f",
+        "method": "POST",
+        "path": "/cockpit/v1/inbound/cards",
+        "workspace": "aaaaaaaa-1111-4aaa-8aaa-aaaaaaaaaaaa",
+        "user": "system",
+        "request_id": "card-withdraw-idea_42",
+        "body": "{\"service\":\"content-creator\",\"op\":\"withdraw\",\"external_id\":\"idea_42\",\"reason_code\":\"regenerated\"}"
+      },
+      "expected": {
+        "body_sha256": "deea7971078c67e7aa2fba9b444ff2edf68296ef4c36632787ac571746446bf3",
+        "string_to_sign": "COCKPIT-V1\n22222222-3333-4444-8555-666666666666\n1767225960\n0f9e8d7c-6b5a-4c3d-9e2f-1a0b9c8d7e6f\nPOST\n/cockpit/v1/inbound/cards\ndeea7971078c67e7aa2fba9b444ff2edf68296ef4c36632787ac571746446bf3\naaaaaaaa-1111-4aaa-8aaa-aaaaaaaaaaaa\nsystem\ncard-withdraw-idea_42",
+        "signature": "v1=ace48d1d235bfeeae8702fb98f3d946b561cdd2e5285d1f00b18ef84c529c9dd"
+      }
+    }
+  ]
+}

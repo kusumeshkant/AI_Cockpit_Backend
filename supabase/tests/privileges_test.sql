@@ -4,7 +4,7 @@
 -- (prod sign-in: 42501 on the profile read). Any drift — a missing grant or
 -- an extra one — fails here. Keep in sync with 0009's header and
 -- scripts/deploy-check.ts (EXPECTED_PRIVILEGES). Later migrations extend it:
--- 0010 feature_setting; 0011 agent services; 0012 gateway proxy.
+-- 0010 feature_setting; 0011 agent services; 0012 gateway proxy; 0013 service cards.
 begin;
 create extension if not exists pgtap with schema extensions;
 
@@ -86,6 +86,8 @@ select is(
                         ('agent_service', 'base_url'), ('agent_service', 'manifest'),
                         ('agent_service', 'signing_key_current_id'),
                         ('agent_service', 'signing_key_next_id'),
+                        ('agent_service', 'inbound_key_current_id'),
+                        ('agent_service', 'inbound_key_next_id'),
                         ('service_access', 'subject')) s(t, col)
     where has_column_privilege(r, format('public.%I', s.t), s.col, 'SELECT')),
   0, 'no client role can read push tokens, Vault secret ids or callback internals');
@@ -151,7 +153,14 @@ select set_eq(
       ('service_role',  'register_agent_service(text, text, text, text, text, text, text, jsonb, text, text, text)'),
       ('service_role',  'get_service_signing_key(text)'),
       ('service_role',  'swap_service_signing_keys(text)'),
-      ('service_role',  'record_gateway_outcome(uuid, text, text, integer, integer, integer, boolean, boolean)')$$,
+      ('service_role',  'record_gateway_outcome(uuid, text, text, integer, integer, integer, boolean, boolean)'),
+      ('service_role',  'register_agent_service(text, text, text, text, text, text, text, jsonb, text, text, text, text, text)'),
+      ('service_role',  'get_service_inbound_keys(text)'),
+      ('service_role',  'swap_service_inbound_keys(text)'),
+      ('service_role',  'claim_gateway_nonce(uuid, text)'),
+      ('service_role',  'resolve_service_inbound(text, text)'),
+      ('service_role',  'record_action_update(uuid, text, integer, text, text, jsonb, timestamp with time zone)'),
+      ('service_role',  'record_action_withdraw(uuid, text, text)')$$,
   'function EXECUTE: authenticated only the RLS helper and its two RPCs, service_role the Edge Function RPCs, anon and PUBLIC nothing');
 
 -- ---------------------------------------------------------------------------

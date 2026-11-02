@@ -45,7 +45,7 @@ insert into m values ('{
   "ui": "native", "ui_schema_version": 1,
   "ops": {"draft.create": {"class": "write", "roles": ["owner", "approver"], "timeout_ms": 10000,
                            "max_request_bytes": 16384, "max_response_bytes": 262144}},
-  "card_types": ["post_draft"], "data_categories": ["content"], "deletion_op": "subject.delete"
+  "card_types": ["social_post_draft"], "data_categories": ["content"], "deletion_op": "subject.delete"
 }'::jsonb);
 grant select on m to authenticated, anon;
 
@@ -342,7 +342,7 @@ select set_config('t.plain_action', 'e5e5e5e5-e5e5-4e5e-8e5e-e5e5e5e5e5e5', true
 insert into public.action (id, workspace_id, agent_id, external_id, type, title)
 values
   (current_setting('t.svc_action')::uuid, current_setting('t.ws')::uuid,
-   current_setting('t.svc_agent')::uuid, 'svc-1', 'post_draft', 'Service draft'),
+   current_setting('t.svc_agent')::uuid, 'svc-1', 'social_post_draft', 'Service draft'),
   (current_setting('t.plain_action')::uuid, current_setting('t.ws')::uuid,
    current_setting('t.plain')::uuid, 'plain-1', 'email', 'Plain draft');
 

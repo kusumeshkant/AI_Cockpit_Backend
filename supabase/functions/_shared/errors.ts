@@ -121,6 +121,8 @@ export function fromPostgrest(error: PostgrestError): AppError {
     case 'invalid_op_class':
     case 'invalid_op':
     case 'invalid_gateway_call':
+    case 'invalid_revision':
+    case 'invalid_reason_code':
       return new AppError('validation', error.message);
   }
   // Check-constraint / invalid-input violations are client errors.
