@@ -426,10 +426,12 @@ select is(
   + (select count(*)::int from public.gateway_call where workspace_id = current_setting('t.ws')::uuid)
   + (select count(*)::int from public.gateway_rate where user_id = current_setting('t.olive')::uuid),
   0, 'access, calls and rate rows cascade with the workspace / user');
--- Follow-up (not in this migration): no deletion job is queued for the
--- services the workspace used, so their copy of the subject's data stays.
-select is((select count(*)::int from public.service_deletion_job), 0,
-  'KNOWN GAP: delete_account_data queues no service_deletion_job yet');
+-- 0014 closed the former KNOWN GAP: the used service gets a deletion job,
+-- which survives the workspace delete and holds no PII.
+select results_eq(
+  $$select service_slug, subject, status from public.service_deletion_job$$,
+  $$values ('content-creator'::text, current_setting('t.ws'), 'pending'::text)$$,
+  'delete_account_data queued one deletion job for the used service (slug + subject only)');
 
 select * from finish();
 rollback;

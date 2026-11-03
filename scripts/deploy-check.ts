@@ -34,9 +34,9 @@ const EXPECTED = {
   ],
   // Play review sign-in (reviewer-signin); reported, never required.
   reviewerSecrets: ['REVIEWER_LOGIN_ENABLED', 'REVIEWER_EMAIL', 'REVIEWER_CODE'],
-  vaultSecrets: ['cockpit_callbacks_retry_url', 'cockpit_cron_secret'],
+  vaultSecrets: ['cockpit_callbacks_retry_url', 'cockpit_cron_secret', 'cockpit_service_deletions_retry_url'],
   extensions: ['pg_cron', 'pg_net', 'supabase_vault'],
-  cronJobs: ['cockpit-callbacks-retry', 'cockpit-gateway-prune'], // 0004, 0012
+  cronJobs: ['cockpit-callbacks-retry', 'cockpit-gateway-prune', 'cockpit-service-deletions-retry'], // 0004, 0012, 0014
   // seed.sql (LOCAL ONLY) leftovers that must never exist in the cloud.
   seedUserId: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
   seedAgentId: 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb',
@@ -132,6 +132,12 @@ const EXPECTED_PRIVILEGES = {
       'resolve_service_inbound(text, text)',
       'record_action_update(uuid, text, integer, text, text, jsonb, timestamp with time zone)',
       'record_action_withdraw(uuid, text, text)',
+      // 0014 service decisions + deletion fan-out
+      'resolve_action_service(uuid, uuid)',
+      'resolve_agent_service(uuid)',
+      'get_service_endpoint(text)',
+      'claim_due_deletion_jobs(integer, integer)',
+      'record_deletion_job_result(uuid, boolean, text, integer)',
     ].map((fn) => `service_role|${fn}`),
   ],
 };

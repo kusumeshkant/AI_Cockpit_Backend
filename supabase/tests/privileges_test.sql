@@ -4,7 +4,7 @@
 -- (prod sign-in: 42501 on the profile read). Any drift — a missing grant or
 -- an extra one — fails here. Keep in sync with 0009's header and
 -- scripts/deploy-check.ts (EXPECTED_PRIVILEGES). Later migrations extend it:
--- 0010 feature_setting; 0011 agent services; 0012 gateway proxy; 0013 service cards.
+-- 0010 feature_setting; 0011 agent services; 0012 gateway proxy; 0013 service cards; 0014 service decisions.
 begin;
 create extension if not exists pgtap with schema extensions;
 
@@ -160,7 +160,12 @@ select set_eq(
       ('service_role',  'claim_gateway_nonce(uuid, text)'),
       ('service_role',  'resolve_service_inbound(text, text)'),
       ('service_role',  'record_action_update(uuid, text, integer, text, text, jsonb, timestamp with time zone)'),
-      ('service_role',  'record_action_withdraw(uuid, text, text)')$$,
+      ('service_role',  'record_action_withdraw(uuid, text, text)'),
+      ('service_role',  'resolve_action_service(uuid, uuid)'),
+      ('service_role',  'resolve_agent_service(uuid)'),
+      ('service_role',  'get_service_endpoint(text)'),
+      ('service_role',  'claim_due_deletion_jobs(integer, integer)'),
+      ('service_role',  'record_deletion_job_result(uuid, boolean, text, integer)')$$,
   'function EXECUTE: authenticated only the RLS helper and its two RPCs, service_role the Edge Function RPCs, anon and PUBLIC nothing');
 
 -- ---------------------------------------------------------------------------

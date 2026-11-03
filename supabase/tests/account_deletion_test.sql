@@ -189,8 +189,8 @@ select is(
   (select array_agg(column_name::text order by ordinal_position) from information_schema.columns
     where table_schema = 'public' and table_name = 'account_deletion_log'),
   array['id', 'subject_hash', 'role', 'workspace_deleted', 'members_moved',
-        'actions_deleted', 'audit_entries', 'deleted_at'],
-  'the log has no column for email, name or payload');
+        'actions_deleted', 'audit_entries', 'deleted_at', 'service_jobs'],
+  'the log has no column for email, name or payload (0014 adds the service_jobs count)');
 
 select ok(not has_table_privilege('authenticated', 'public.account_deletion_log', 'select'),
   'clients cannot read the deletion log');

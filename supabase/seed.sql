@@ -61,3 +61,9 @@ select vault.create_secret(
   'cron_local_dev_only_never_use_in_production',
   'cockpit_cron_secret',
   'Local dev: X-Cron-Secret for callbacks-retry');
+
+-- service-deletions-retry schedule (0014), same Kong URL pattern and cron secret.
+select vault.create_secret(
+  'http://supabase_kong_cockpit:8000/functions/v1/service-deletions-retry',
+  'cockpit_service_deletions_retry_url',
+  'Local dev: service-deletions-retry endpoint for pg_cron');

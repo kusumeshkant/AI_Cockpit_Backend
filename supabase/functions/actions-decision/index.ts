@@ -12,6 +12,10 @@
 //      decision's Idempotency-Key so the agent can drop repeats.
 //   5. record_callback_result — delivered, or retrying with backoff (TR-7),
 //      or failed when the URL is blocked / the secret is missing.
+// 0014: an action from a SERVICE agent (agent-service-inbound card) takes
+// _shared/service_decision.ts instead — behind the agent_services flag,
+// approve / reject only, approve through the agent first, reject recorded
+// first and delivered via decision.apply. Ordinary agents are unchanged.
 import { attemptDelivery } from '../_shared/delivery.ts';
 import { loadEnv } from '../_shared/env.ts';
 import { AppError, fromPostgrest } from '../_shared/errors.ts';
@@ -24,7 +28,14 @@ import type {
   DecisionOutcome,
   DecisionResponse,
 } from '../_shared/types.ts';
-import { DecisionSchema, IdempotencyKeySchema, MAX_DECISION_BYTES } from '../_shared/validation.ts';
+import { isFeatureEnabled } from '../_shared/flags.ts';
+import { type ActionServiceRow, decideServiceAction } from '../_shared/service_decision.ts';
+import {
+  DecisionSchema,
+  IdempotencyKeySchema,
+  MAX_DECISION_BYTES,
+  ServiceDecisionSchema,
+} from '../_shared/validation.ts';
 
 const env = loadEnv();
 
@@ -45,9 +56,26 @@ Deno.serve(
     if (!key.success) {
       throw new AppError('validation', 'A valid Idempotency-Key header is required');
     }
-    const body = parseJson(await readRawBody(req, MAX_DECISION_BYTES), DecisionSchema);
-
+    const raw = await readRawBody(req, MAX_DECISION_BYTES);
     const client = serviceClient();
+
+    // 0014: a card from a SERVICE agent takes the gateway branch (behind the
+    // agent_services flag). Every other action continues below, unchanged.
+    const serviceTarget = await resolveActionService(client, raw, actorId);
+    if (serviceTarget) {
+      if (!(await isFeatureEnabled('agent_services'))) {
+        throw new AppError('feature_disabled', 'Agent services are not enabled');
+      }
+      const serviceBody = parseJson(raw, ServiceDecisionSchema);
+      return json(
+        await decideServiceAction(
+          { client, allowInsecureServices: env.allowInsecureServices },
+          { actorId, key: key.data, body: serviceBody, target: serviceTarget },
+        ),
+      );
+    }
+
+    const body = parseJson(raw, DecisionSchema);
     const { data, error } = await client
       .rpc('record_decision', {
         p_action_id: body.action_id,
@@ -96,6 +124,28 @@ Deno.serve(
     return json(response);
   }),
 );
+
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+/** The service behind the body's action, if any (no row for ordinary agents). */
+async function resolveActionService(
+  client: ReturnType<typeof serviceClient>,
+  raw: string,
+  actorId: string,
+): Promise<ActionServiceRow | null> {
+  let actionId: unknown;
+  try {
+    actionId = (JSON.parse(raw) as { action_id?: unknown })?.action_id;
+  } catch {
+    return null;
+  }
+  if (typeof actionId !== 'string' || !UUID.test(actionId)) return null;
+  const { data, error } = await client
+    .rpc('resolve_action_service', { p_action_id: actionId, p_user_id: actorId })
+    .maybeSingle<ActionServiceRow>();
+  if (error) throw fromPostgrest(error);
+  return data ?? null;
+}
 
 /** First delivery attempt; failures are scheduled for retry. Never throws. */
 async function deliver(row: DecisionRow, idempotencyKey: string): Promise<boolean> {
